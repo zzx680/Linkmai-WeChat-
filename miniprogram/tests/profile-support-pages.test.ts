@@ -31,10 +31,11 @@ describe('profile support pages', () => {
     assert.doesNotMatch(helpSource, /Taro\.request|setStorage|storage/)
   })
 
-  it('uses the shorter retry label', () => {
-    assert.match(caseSource, /actionLabel=\{isAuthenticating \? '正在连接微信账户' : authRetryable \? '重新连接并开始' : '微信登录并开始'\}/)
-    assert.match(caseSource, /onAction=\{handlePrimaryAction\}/)
-    assert.doesNotMatch(caseSource, /重新连接微信账户/)
+  it('keeps browsing public and makes login user initiated', () => {
+    assert.match(caseSource, /actionLabel="先浏览处理流程"/)
+    assert.match(caseSource, /onAction=\{handleBrowseFlow\}/)
+    assert.match(caseSource, /登录后创建案件/)
+    assert.doesNotMatch(caseSource, /actionLabel=\{isAuthenticating \? '正在连接微信账户'/)
   })
 
   it('does not repeat non-interactive help or settings entry points', () => {

@@ -80,15 +80,24 @@ export default function CasePage() {
     }
   }
 
+  const handleBrowseFlow = () => {
+    Taro.switchTab({ url: '/pages/agent/index' })
+  }
+
+  const handleLogin = () => {
+    if (isCreating || isPaying || isAuthenticating) return
+    retryAuth().then(ok => {
+      if (ok) {
+        completeGuideSteps(['login'])
+        Taro.showToast({ title: '登录成功', icon: 'success' })
+      }
+    })
+  }
+
   const handlePrimaryAction = () => {
     if (isCreating || isPaying || isAuthenticating) return
     if (mode === 'logged_out' || authRetryable) {
-      retryAuth().then(ok => {
-        if (ok) {
-          completeGuideSteps(['login'])
-          Taro.showToast({ title: '登录成功', icon: 'success' })
-        }
-      })
+      handleLogin()
       return
     }
     if (mode === 'load_error') {
@@ -126,8 +135,12 @@ export default function CasePage() {
       <View className="case-page welcome-page">
         <View className="welcome-intro">
           <Text className="welcome-title">欢迎使用灵迈 👋</Text>
+          <Text className="welcome-description">无需登录即可先浏览事故处理流程和功能。创建案件或保存进度时，再由你选择登录。</Text>
         </View>
-        <CaseJourney active={0} compact identityLabel="登录后使用案件工作台" actionId="guide-login" actionLabel={isAuthenticating ? '正在连接微信账户' : authRetryable ? '重新连接并开始' : '微信登录并开始'} onAction={handlePrimaryAction} actionLoading={isAuthenticating} />
+        <CaseJourney active={0} compact identityLabel="可先浏览处理流程" actionId="guide-browse-flow" actionLabel="先浏览处理流程" onAction={handleBrowseFlow} />
+        <Button className="welcome-login-action" loading={isAuthenticating} disabled={isAuthenticating} onClick={handleLogin}>
+          {isAuthenticating ? '正在连接微信账户' : authRetryable ? '重新连接并开始' : '登录后创建案件'}
+        </Button>
         {authError && <View className="auth-error-panel"><Text className="auth-error-title">暂未连接到你的账户</Text></View>}
         <View className="welcome-privacy-link" onClick={() => Taro.navigateTo({ url: '/pages/privacy/index' })} role="button"><Text>查看隐私说明与数据管理</Text></View>
         <View className="welcome-boundary"><Text>灵迈提供 AI 辅助整理与分析，不替代专业法律意见。</Text></View>

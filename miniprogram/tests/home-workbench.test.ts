@@ -134,10 +134,11 @@ describe('home workbench state', () => {
 
   it('uses one state-aligned journey on signed-in and login pages', () => {
     assert.equal((casePageSource.match(/<CaseJourney/g) || []).length, 2)
-    assert.match(casePageSource, /<CaseJourney active=\{0\} compact[\s\S]*actionId="guide-login"[\s\S]*onAction=\{handlePrimaryAction\}/)
+    assert.match(casePageSource, /<CaseJourney active=\{0\} compact[\s\S]*actionId="guide-browse-flow"[\s\S]*actionLabel="先浏览处理流程"[\s\S]*onAction=\{handleBrowseFlow\}/)
     assert.match(casePageSource, /<CaseJourney active=\{getJourneyStep\(nextStep\)\} compact[^>]*identityLabel=/)
-    assert.doesNotMatch(casePageSource, /actionLabel="开始处理"/)
-    assert.match(casePageSource, /identityLabel="登录后使用案件工作台"/)
+    assert.doesNotMatch(casePageSource, /actionLabel="微信登录并开始"/)
+    assert.match(casePageSource, /登录后创建案件/)
+    assert.match(casePageSource, /无需登录即可先浏览事故处理流程和功能/)
     assert.match(journeySource, /journey-node"><Text>\{index < currentStep \? '✓' : index \+ 1\}<\/Text>/)
     assert.doesNotMatch(journeySource, /padStart\(/)
     assert.equal(getJourneyStep('continue_materials'), 0)
