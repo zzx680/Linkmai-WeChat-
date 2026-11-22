@@ -87,6 +87,62 @@
   &:active { color: $color-brand-primary; }
 }
 .chat-message-time { color: $color-text-tertiary; font-size: 22rpx; line-height: 1.4; }
+.chat-choice-form {
+  box-sizing: border-box;
+  width: calc(100% - 24rpx);
+  margin: 12rpx 0 20rpx;
+  padding: 24rpx;
+  border: 1rpx solid $color-border-light;
+  border-radius: 12rpx;
+  background: #FFFFFF;
+  color: $color-text-primary;
+}
+.chat-choice-form-title { display: block; font-size: 28rpx; font-weight: 600; line-height: 1.5; }
+.chat-choice-question { padding: 22rpx 0 16rpx; }
+.chat-choice-question + .chat-choice-question { border-top: 1rpx solid $color-border-light; }
+.chat-choice-question-title { display: block; margin-bottom: 8rpx; font-size: 26rpx; font-weight: 600; line-height: 1.5; }
+.chat-choice-options { display: flex; flex-direction: column; }
+.chat-choice-option {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  min-height: 62rpx;
+  padding: 6rpx 0;
+  color: $color-text-primary;
+  &.is-locked { opacity: .65; }
+}
+.chat-choice-radio {
+  display: flex;
+  flex: 0 0 36rpx;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 36rpx;
+  height: 36rpx;
+  border: 2rpx solid $color-border-medium;
+  border-radius: 50%;
+  background: #FFFFFF;
+}
+.chat-choice-option.is-selected .chat-choice-radio { border-color: $color-brand-primary; }
+.chat-choice-radio-dot { width: 18rpx; height: 18rpx; border-radius: 50%; background: $color-brand-primary; }
+.chat-choice-option-label { min-width: 0; font-size: 25rpx; line-height: 1.5; overflow-wrap: anywhere; }
+.chat-choice-submit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 76rpx;
+  margin: 12rpx 0 0;
+  border: 0;
+  border-radius: 10rpx;
+  background: $color-brand-primary;
+  color: #FFFFFF;
+  font-size: 26rpx;
+  line-height: 1.4;
+  &::after { border: 0; }
+  &[disabled] { opacity: .45; }
+}
+.chat-choice-form.is-submitted .chat-choice-submit { background: $color-bg-subtle; color: $color-text-secondary; }
 .chat-preview-content { max-width: 100%; color: $color-text-primary; font-size: 30rpx; line-height: 1.72; white-space: pre-wrap; overflow-wrap: anywhere; }
 .chat-preview-message-user {
   align-items: flex-end;

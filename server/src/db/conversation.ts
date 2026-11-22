@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { AgentState } from '../services/agent'
 import type { ConfirmedCaseFactInput } from './harness'
+import type { ChoiceForm } from '../services/choice-form'
 
 export interface ConversationSnapshot {
   conversationId: string
@@ -45,10 +46,12 @@ export interface ConversationCommit {
   expected: ConversationSnapshot
   agentState: AgentState
   assistantText: string
+  choiceForm?: ChoiceForm
 }
 
 export interface ConversationTurnResult {
   agentState: AgentState
   assistantText: string
   quickReplies: NonNullable<AgentState['quickReplies']>
+  choiceForm?: ChoiceForm
 }

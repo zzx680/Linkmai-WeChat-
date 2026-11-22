@@ -831,10 +831,10 @@ export const db = {
           await client.query(`INSERT INTO case_revisions (id,case_id,input_revision,reason_code,changed_entity_type,changed_entity_id,created_at) VALUES ($1,$2,$3,'conversation_confirmation','conversation',$4,NOW())`, [generateId('revision'), input.caseId, revision, input.expected.conversationId])
         }
       }
-      const result = structuredClone({ agentState: input.agentState, assistantText: input.assistantText, quickReplies: input.agentState.quickReplies || [] })
+      const result = structuredClone({ agentState: input.agentState, assistantText: input.assistantText, quickReplies: input.agentState.quickReplies || [], ...(input.choiceForm ? { choiceForm: input.choiceForm } : {}) })
       await client.query(`INSERT INTO messages (id,conversation_id,role,kind,text,metadata,request_id,request_hash,created_at) VALUES ($1,$2,'user','text',$3,$4,$5,$6,NOW())`, [generateId('msg'), input.expected.conversationId, input.text || null, input.metadata ? JSON.stringify(input.metadata) : null, null, null])
       await client.query('UPDATE conversations SET agent_state=$1,updated_at=NOW() WHERE id=$2', [JSON.stringify(input.agentState), input.expected.conversationId])
-      await client.query(`INSERT INTO messages (id,conversation_id,role,kind,text,metadata,request_id,request_hash,created_at) VALUES ($1,$2,'assistant','text',$3,$4,$5,$6,NOW())`, [generateId('msg'), input.expected.conversationId, result.assistantText, JSON.stringify({ quickReplies: result.quickReplies, turnResult: result }), input.requestId, input.requestHash])
+      await client.query(`INSERT INTO messages (id,conversation_id,role,kind,text,metadata,request_id,request_hash,created_at) VALUES ($1,$2,'assistant','text',$3,$4,$5,$6,NOW())`, [generateId('msg'), input.expected.conversationId, result.assistantText, JSON.stringify({ quickReplies: result.quickReplies, ...(result.choiceForm ? { choiceForm: result.choiceForm } : {}), turnResult: result }), input.requestId, input.requestHash])
       await client.query('COMMIT')
       return result
     } catch (error) { await client.query('ROLLBACK').catch(() => undefined); throw error } finally { client.release() }

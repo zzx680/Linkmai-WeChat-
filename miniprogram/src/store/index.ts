@@ -38,7 +38,7 @@ interface AppState {
   createCase: () => Promise<void>
   updateCase: (updates: Partial<api.Case>) => Promise<void>
   loadMessages: () => Promise<void>
-  sendMessage: (content: string, action?: string, artifactIds?: string[]) => Promise<void>
+  sendMessage: (content: string, action?: string, artifactIds?: string[], choiceFormId?: string) => Promise<void>
   setAiTyping: (typing: boolean) => void
   uploadImage: (filePath: string) => Promise<api.UploadedImage>
   processMaterial: (type: api.MaterialType, artifactId: string) => Promise<api.Material>
@@ -346,7 +346,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  sendMessage: async (content, action, artifactIds) => {
+  sendMessage: async (content, action, artifactIds, choiceFormId) => {
     const currentCase = get().currentCase
     if (!currentCase) {
       Taro.showToast({ title: '请先创建案件', icon: 'none' })
@@ -363,7 +363,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       sendingCaseId = null
       throw error
     }
-    const requestKey = JSON.stringify([currentCase.id, content, action || null, artifactIds || []])
+    const requestKey = JSON.stringify([currentCase.id, content, action || null, artifactIds || [], choiceFormId || null])
     const retrying = pendingConversationRequests.has(requestKey)
     const requestId = pendingConversationRequests.get(requestKey)
       || `turn-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -396,7 +396,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             ? state.messages.map(message => message.id === streamMessage.id ? { ...message, content: message.content + delta } : message)
             : [...state.messages, { ...streamMessage, content: delta }],
           }))
-        },
+        }, choiceFormId,
       )
       pendingConversationRequests.delete(requestKey)
       if (isStale(context)) return
@@ -405,10 +405,17 @@ export const useAppStore = create<AppState>((set, get) => ({
         role: 'assistant',
         content: response.message,
         quickReplies: response.quickReplies,
+        choiceForm: response.choiceForm,
         timestamp: new Date().toISOString()
       }
       set(state => ({
-        messages: [...state.messages.filter(message => message.id !== temporaryMessage.id && message.id !== streamMessage.id), temporaryMessage, assistantMessage],
+        messages: [
+          ...state.messages
+            .filter(message => message.id !== temporaryMessage.id && message.id !== streamMessage.id)
+            .map(message => message.choiceForm?.id === choiceFormId ? { ...message, choiceFormSubmitted: true } : message),
+          temporaryMessage,
+          assistantMessage,
+        ],
         conversationState: response.agentState?.stage || state.conversationState,
         readiness: response.readiness || null,
         isAiTyping: false

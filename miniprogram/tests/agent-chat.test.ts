@@ -10,6 +10,7 @@ import ts from 'typescript'
 import * as labels from '../src/components/AgentChat/labels'
 
 const file = path.resolve(__dirname, '../src/components/AgentChat/index.tsx')
+const formFile = path.resolve(__dirname, '../src/components/AgentChat/ChoiceFormCard.tsx')
 const localRequire = createRequire(file)
 function loadChat(h5 = false) {
   const module = { exports: {} as Record<string, (props: any) => React.ReactElement<any>> }
@@ -27,6 +28,7 @@ function loadChat(h5 = false) {
       if (id === './labels') return labels
       if (id === '../Icon') return { __esModule: true, default: () => React.createElement('img', { alt: '' }) }
       if (id === '../ThinkingOrb') return { __esModule: true, default: () => React.createElement('div', { role: 'status', 'aria-label': '正在整理案件信息' }) }
+      if (id === './ChoiceFormCard') return { __esModule: true, default: (props: any) => React.createElement('section', { 'data-form-id': props.form.id }) }
       if (id.endsWith('.scss')) return {}
       return localRequire(id)
     },
@@ -58,7 +60,7 @@ test('assistant replies expose copy action and timestamp while user messages sta
   const native = loadChat().AgentChatMessage({ message: { role: 'assistant', content: '已收到', timestamp } })
   assert.equal(find(native, 't-chat-message')!.props.placement, 'left')
   assert.equal(find(native, 't-chat-message')!.props.name, '')
-  const meta = native.props.children[1]
+  const meta = React.Children.toArray(native.props.children).filter(Boolean).at(-1) as React.ReactElement<any>
   assert.equal(meta.props.text, '已收到')
   assert.equal(meta.props.timestamp, timestamp)
   const h5 = renderToStaticMarkup(loadChat(true).AgentChatMessage({ message: { role: 'assistant', content: '已收到', timestamp } }))
@@ -87,6 +89,71 @@ test('partial replies render their body while withholding completed-message acti
     if (h5) assert.match(renderToStaticMarkup(node), /正在输出/)
     else assert.equal(find(node, 't-chat-message')!.props.content[0].data, '正在输出')
   }
+})
+
+test('assistant choice form is rendered with the message and hidden after successful selection', () => {
+  const native = loadChat().AgentChatMessage({ message: {
+    role: 'assistant', content: '请从下面的选项中补充信息。',
+    choiceForm: { id: 'form-1', title: '补充事故信息', questions: [] },
+  } })
+  const card = React.Children.toArray(native.props.children).find(child => React.isValidElement<any>(child) && child.props.form?.id === 'form-1') as React.ReactElement<any>
+  assert.equal(card.props.submitted, undefined)
+  const submitted = loadChat().AgentChatMessage({ message: {
+    role: 'assistant', content: '请从下面的选项中补充信息。',
+    choiceForm: { id: 'form-1', title: '补充事故信息', questions: [] }, choiceFormSubmitted: true,
+  } })
+  const submittedCard = React.Children.toArray(submitted.props.children).find(child => React.isValidElement<any>(child) && child.props.form?.id === 'form-1') as React.ReactElement<any>
+  assert.equal(submittedCard.props.submitted, true)
+})
+
+test('choice form requires one answer per question and submits only selected options once', async () => {
+  const localRequire = createRequire(formFile)
+  const states: any[] = []
+  const choices: Array<{ form: any; submitted?: boolean; disabled?: boolean; onSubmit?: (answers: Record<string, string>) => Promise<void> }> = []
+  let setterIndex = 0
+  const module = { exports: {} as { default: (props: any) => React.ReactElement<any> } }
+  vm.runInNewContext(ts.transpileModule(readFileSync(formFile, 'utf8'), {
+    compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
+  }).outputText, {
+    module, exports: module.exports,
+    require(id: string) {
+      if (id === 'react') return { useState(initial: unknown) {
+        const index = setterIndex++
+        if (!(index in states)) states[index] = initial
+        return [states[index], (value: unknown) => { states[index] = typeof value === 'function' ? value(states[index]) : value }]
+      } }
+      if (id === '@tarojs/components') return { Button: 'button', Text: 'span', View: 'div' }
+      if (id.endsWith('.scss')) return {}
+      return localRequire(id)
+    },
+  }, { filename: formFile })
+  const form = { id: 'f', title: '请补充事故情况', questions: [
+    { id: 'q1', title: '你当时是？', options: ['驾驶员', '乘客', '不清楚'] },
+    { id: 'q2', title: '是否报警？', options: ['已报警', '未报警', '不清楚'] },
+  ] }
+  let submitted: Record<string, string> | undefined
+  const props = { form, onSubmit: async (answers: Record<string, string>) => { submitted = answers } }
+  const render = () => { setterIndex = 0; return module.exports.default(props) }
+  const findAll = (node: React.ReactNode, predicate: (element: React.ReactElement<any>) => boolean): React.ReactElement<any>[] => {
+    if (!React.isValidElement<any>(node)) return []
+    return [...(predicate(node) ? [node] : []), ...React.Children.toArray(node.props.children).flatMap(child => findAll(child, predicate))]
+  }
+  let tree = render()
+  let button = findAll(tree, node => node.type === 'button')[0]
+  assert.equal(button.props.disabled, true)
+  let radios = findAll(tree, node => node.props.role === 'radio')
+  radios[0].props.onClick()
+  tree = render()
+  button = findAll(tree, node => node.type === 'button')[0]
+  assert.equal(button.props.disabled, true)
+  radios = findAll(tree, node => node.props.role === 'radio')
+  radios[4].props.onClick()
+  tree = render()
+  button = findAll(tree, node => node.type === 'button')[0]
+  assert.equal(button.props.disabled, false)
+  await button.props.onClick()
+  assert.equal(submitted?.q1, '驾驶员')
+  assert.equal(submitted?.q2, '未报警')
 })
 
 test('native sender bridges TDesign detail events and avoids unsupported stop/upload workflows', () => {

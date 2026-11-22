@@ -4,7 +4,7 @@ import Taro, { useDidHide, useDidShow } from '@tarojs/taro'
 import { syncTabRoute } from '../../custom-tab-bar/navigation'
 import { useAppStore } from '../../store'
 import { Icon } from '../../components'
-import { MaterialType, QuickReply } from '../../services/api'
+import { ChoiceForm, MaterialType, QuickReply } from '../../services/api'
 import brandLogo from '../../assets/brand/linkmai-chat.png'
 import { AgentChatMessage, AgentChatSender } from '../../components/AgentChat'
 import { getQuickReplyLabel, getQuickReplySelection } from '../../components/AgentChat/labels'
@@ -88,6 +88,13 @@ export default function Agent() {
       if (!quickReply && inputRevision.current === draftRevision) setInputText(text)
       Taro.showToast({ title: (error as Error).message || '发送失败', icon: 'none' })
     }
+  }
+
+  const handleChoiceFormSubmit = async (form: ChoiceForm, answers: Record<string, string>) => {
+    const answerText = form.questions
+      .map(question => `${question.title}：${answers[question.id]}`)
+      .join('\n')
+    await sendMessage(`按选择补充信息：\n${answerText}`, undefined, undefined, form.id)
   }
 
   const handleChooseImage = async () => {
@@ -229,7 +236,7 @@ export default function Agent() {
                 <View className="messages-list">
                   {messages.map((msg, index) => (
                     <View key={msg.id} id={`msg-${index}`} className="chat-message-row">
-                      <AgentChatMessage message={msg} />
+                      <AgentChatMessage message={msg} sending={isAiTyping} onSubmitChoiceForm={handleChoiceFormSubmit} />
                       {index === messages.length - 1 && msg.role === 'assistant' && msg.quickReplies?.some(reply => !['generate_report', ...(stage === 'ready' ? ['edit', 'confirm:edit'] : [])].includes(reply.action || reply.value)) && (
                         <View className="quick-replies">
                           {msg.quickReplies.filter(reply => !['generate_report', ...(stage === 'ready' ? ['edit', 'confirm:edit'] : [])].includes(reply.action || reply.value)).map(reply => (

@@ -21,6 +21,7 @@ interface DeepSeekResponse {
     message: {
       role: string
       content: string
+      tool_calls?: Array<{ id?: string; type: 'function'; function: { name: string; arguments: string } }>
     }
     finish_reason: string
   }>
@@ -29,6 +30,22 @@ interface DeepSeekResponse {
     completion_tokens: number
     total_tokens: number
   }
+}
+
+export interface DeepSeekTool {
+  type: 'function'
+  function: { name: string; description: string; parameters: Record<string, unknown> }
+}
+
+export interface DeepSeekToolCall {
+  id?: string
+  type: 'function'
+  function: { name: string; arguments: string }
+}
+
+export interface DeepSeekStreamResult {
+  content: string
+  toolCalls: DeepSeekToolCall[]
 }
 
 /**
@@ -40,6 +57,7 @@ export async function callDeepSeek(
     temperature?: number
     maxTokens?: number
     timeoutMs?: number
+    tools?: DeepSeekTool[]
   }
 ): Promise<DeepSeekResponse> {
   const response = await axios.post(
@@ -49,6 +67,7 @@ export async function callDeepSeek(
       messages,
       temperature: options?.temperature ?? 0.7,
       max_tokens: options?.maxTokens ?? 2000,
+      ...(options?.tools ? { tools: options.tools } : {}),
     },
     {
       timeout: Math.min(config.deepseek.timeoutMs, options?.timeoutMs ?? config.deepseek.timeoutMs),
@@ -70,6 +89,16 @@ export async function streamDeepSeek(
   onDelta: (delta: string) => void,
   options?: { temperature?: number; maxTokens?: number; timeoutMs?: number }
 ): Promise<string> {
+  const result = await streamDeepSeekResponse(messages, onDelta, options)
+  if (result.toolCalls.length) throw new Error('MODEL_UNAVAILABLE')
+  return result.content
+}
+
+export async function streamDeepSeekResponse(
+  messages: DeepSeekMessage[],
+  onDelta: (delta: string) => void,
+  options?: { temperature?: number; maxTokens?: number; timeoutMs?: number; tools?: DeepSeekTool[] }
+): Promise<DeepSeekStreamResult> {
   const timeoutMs = Math.min(config.deepseek.timeoutMs, options?.timeoutMs ?? config.deepseek.timeoutMs)
   const controller = new AbortController()
   // Bound the whole generation, including a provider that keeps sending keepalives.
@@ -83,6 +112,7 @@ export async function streamDeepSeek(
         messages,
         temperature: options?.temperature ?? 0.7,
         max_tokens: options?.maxTokens ?? 2000,
+        ...(options?.tools ? { tools: options.tools } : {}),
         stream: true,
       },
       {
@@ -99,6 +129,7 @@ export async function streamDeepSeek(
     let content = ''
     let completed = false
     let stopped = false
+    const toolCalls = new Map<number, DeepSeekToolCall>()
     const consume = (line: string) => {
       if (!line.startsWith('data:')) return
       const data = line.slice(5).trim()
@@ -108,7 +139,7 @@ export async function streamDeepSeek(
       if (event.error) throw new Error('MODEL_UNAVAILABLE')
       const choice = event.choices?.[0]
       if (choice?.finish_reason) {
-        if (choice.finish_reason !== 'stop') throw new Error('MODEL_UNAVAILABLE')
+        if (choice.finish_reason !== 'stop' && choice.finish_reason !== 'tool_calls') throw new Error('MODEL_UNAVAILABLE')
         stopped = true
       }
       const delta = choice?.delta?.content
@@ -116,6 +147,15 @@ export async function streamDeepSeek(
         content += delta
         if (content.length > 100_000) throw new Error('MODEL_UNAVAILABLE')
         onDelta(delta)
+      }
+      for (const partial of choice?.delta?.tool_calls || []) {
+        const index = Number.isInteger(partial.index) ? partial.index : 0
+        const existing = toolCalls.get(index) || { id: undefined, type: 'function' as const, function: { name: '', arguments: '' } }
+        if (typeof partial.id === 'string') existing.id = partial.id
+        if (typeof partial.function?.name === 'string') existing.function.name += partial.function.name
+        if (typeof partial.function?.arguments === 'string') existing.function.arguments += partial.function.arguments
+        if (existing.function.name.length > 100 || existing.function.arguments.length > 16_000 || toolCalls.size > 4) throw new Error('MODEL_UNAVAILABLE')
+        toolCalls.set(index, existing)
       }
     }
     for await (const chunk of response.data as AsyncIterable<Buffer | string>) {
@@ -130,8 +170,8 @@ export async function streamDeepSeek(
       }
       if (completed) break
     }
-    if (!completed || !stopped || !content.trim()) throw new Error('MODEL_UNAVAILABLE')
-    return content
+    if (!completed || !stopped || (!content.trim() && !toolCalls.size)) throw new Error('MODEL_UNAVAILABLE')
+    return { content, toolCalls: [...toolCalls.entries()].sort(([a], [b]) => a - b).map(([, tool]) => tool) }
   } finally {
     clearTimeout(deadline)
     upstream?.destroy?.()

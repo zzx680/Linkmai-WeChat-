@@ -2,6 +2,7 @@
 // confirmed materials remain separate from free-form model output.
 import { detectAccidentType, interpretUserMessage, validFactValue, type MessageInterpreter } from './agent-language'
 import { reportFactDefinitions, reportReadiness, type CaseAgentContext } from '../harness/case-agent'
+import type { ChoiceForm } from './choice-form'
 export interface AgentState {
   stage: 'collecting' | 'confirming' | 'analyzing' | 'ready'
   collectedFacts: CollectedFact[]
@@ -73,7 +74,7 @@ export async function processUserMessage(
   interpret: MessageInterpreter = interpretUserMessage,
   context?: CaseAgentContext,
   onDelta?: (delta: string) => void,
-): Promise<{ agentState: AgentState; assistantText: string }> {
+): Promise<{ agentState: AgentState; assistantText: string; choiceForm?: ChoiceForm }> {
   const text = userMessage.trim()
   const control = normalizeAgentAction(action || '')
   const next = structuredClone(state)
@@ -137,7 +138,7 @@ export async function processUserMessage(
   if (!understood.reply?.trim()) throw new Error('MODEL_UNAVAILABLE')
   next.nextQuestion = understood.reply
   next.lastTurn = { mode: 'conversation', modelStatus: 'model' }
-  return { agentState: next, assistantText: understood.reply }
+  return { agentState: next, assistantText: understood.reply, ...(understood.choiceForm ? { choiceForm: understood.choiceForm } : {}) }
 }
 
 export function canGenerateReport(state: AgentState): boolean {

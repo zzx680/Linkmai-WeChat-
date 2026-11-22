@@ -103,7 +103,7 @@ router.get('/current', async (req, res) => {
 
 router.post('/current/messages', async (req, res) => {
   try {
-    const { caseId, text, action, artifactIds = [], images, imageUrl, url } = req.body || {}
+    const { caseId, text, action, artifactIds = [], images, imageUrl, url, choiceFormId } = req.body || {}
     const wantsStream = req.body?.stream === true
     const requestId = req.body?.requestId === undefined ? randomUUID() : req.body.requestId
     const caseData = await ownedCase(req, res, caseId)
@@ -113,6 +113,7 @@ router.post('/current/messages', async (req, res) => {
     }
     if (typeof requestId !== 'string' || !requestId.trim() || requestId.length > 128 ||
       (text !== undefined && (typeof text !== 'string' || text.length > 10000)) ||
+      (choiceFormId !== undefined && (typeof choiceFormId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(choiceFormId))) ||
       !Array.isArray(artifactIds) || artifactIds.length > 20 || artifactIds.some(id => typeof id !== 'string' || !id.trim()) ||
       (action !== undefined && (typeof action !== 'string' || !(['confirm', 'edit', 'finish', 'upload', 'generate_report', 'manual_input'].includes(normalizeAgentAction(action)) || (action.startsWith('edit:') && caseAgentFactKeys.some(key => action === `edit:${key}`)))))) {
       return res.status(400).json({ success: false, error: '消息参数不合法' })
@@ -133,7 +134,7 @@ router.post('/current/messages', async (req, res) => {
       materials.push({ type: artifact.type, artifactId, extractedData, confirmed: artifact.metadata?.confirmed === true })
     }
 
-    const requestHash = conversationHash({ caseId, text: text || '', action: action ? normalizeAgentAction(action) : undefined, artifactIds: attachedIds })
+    const requestHash = conversationHash({ caseId, text: text || '', action: action ? normalizeAgentAction(action) : undefined, artifactIds: attachedIds, choiceFormId })
     const replay = await persistence.findConversationTurnResult(req.userId!, caseData.id, requestId, requestHash)
     if (replay) {
       const workspace = process.env.HARNESS_ENABLED === 'true' ? await harness.get(req.userId!, caseData.id) : undefined
@@ -151,17 +152,37 @@ router.post('/current/messages', async (req, res) => {
     const workspace = process.env.HARNESS_ENABLED === 'true' ? await harness.get(req.userId!, caseData.id) : undefined
     const snapshot: ConversationSnapshot & { agentState: AgentState; artifacts: any[]; recentMessages: any[] } =
       await persistence.readConversationSnapshot(req.userId!, caseData.id)
+    if (choiceFormId) {
+      const messages = await db.getMessages(snapshot.conversationId)
+      const formMessage = [...messages].reverse().find(message => message.role === 'assistant' && message.metadata?.choiceForm?.id === choiceFormId)
+      const form = formMessage?.metadata?.choiceForm
+      const prefix = '按选择补充信息：\n'
+      if (!form || typeof text !== 'string' || !text.startsWith(prefix)) {
+        return res.status(400).json({ success: false, error: '选择卡片已失效，请在对话中重新选择' })
+      }
+      const submittedAnswers = text.slice(prefix.length).split('\n')
+      if (!Array.isArray(form.questions) || submittedAnswers.length !== form.questions.length || submittedAnswers.some((line: string, index: number) => {
+        const question = form.questions[index]
+        if (typeof line !== 'string' || !question || !Array.isArray(question.options)) return true
+        const separator = line.indexOf('：')
+        return separator < 1 || line.slice(0, separator) !== question.title || !question.options.includes(line.slice(separator + 1))
+      })) return res.status(400).json({ success: false, error: '所选答案无效，请重新选择' })
+    }
     const state = snapshot.agentState || initialState()
     const context = await caseContext(req.userId!, snapshot, workspace)
     if (wantsStream) streamEvent(res, 'start', { model: 'deepseek' })
-    const { agentState, assistantText } = await processUserMessage(
+    const { agentState, assistantText, choiceForm } = await processUserMessage(
       state, text || '', materials, action, interpretUserMessage, context,
       wantsStream ? delta => streamEvent(res, 'delta', { delta }) : undefined,
     )
     const committed = await persistence.commitConversationTurn({
       userId: req.userId!, caseId: caseData.id, requestId, requestHash, text: conversationText(text || '', { action: action ? normalizeAgentAction(action) : undefined, attachedMaterials: materials.map(material => ({ type: material.type, confirmed: material.confirmed === true })) }),
-      metadata: { ...(action ? { action: normalizeAgentAction(action) } : {}), ...(attachedIds.length ? { artifactIds: attachedIds } : {}) },
-      expected: snapshot, agentState, assistantText,
+      metadata: {
+        ...(action ? { action: normalizeAgentAction(action) } : {}),
+        ...(attachedIds.length ? { artifactIds: attachedIds } : {}),
+        ...(choiceFormId ? { choiceFormId } : {}),
+      },
+      expected: snapshot, agentState, assistantText, choiceForm,
     })
     const currentWorkspace = process.env.HARNESS_ENABLED === 'true' ? await harness.get(req.userId!, caseData.id) : undefined
     const currentSnapshot = await persistence.readConversationSnapshot(req.userId!, caseData.id)

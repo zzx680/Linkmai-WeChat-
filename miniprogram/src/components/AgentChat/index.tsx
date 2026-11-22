@@ -5,12 +5,15 @@ import Icon from '../Icon'
 import ThinkingOrb from '../ThinkingOrb'
 import type { Message } from '../../services/api'
 import { getChatMessageText } from './labels'
+import ChoiceFormCard from './ChoiceFormCard'
 import type { SpeechState } from '../../services/speech/session'
 import './index.scss'
 
 interface ChatMessageProps {
   message?: Message
   pending?: boolean
+  sending?: boolean
+  onSubmitChoiceForm?: (form: NonNullable<Message['choiceForm']>, answers: Record<string, string>) => Promise<void>
 }
 
 export function formatChatMessageTime(timestamp?: string) {
@@ -42,7 +45,7 @@ function ChatMessageMeta({ text, timestamp }: { text: string; timestamp?: string
 
 // The mini program uses TDesign's native components; H5 keeps a lightweight
 // preview with the same content and callbacks, without a second chat runtime.
-export function AgentChatMessage({ message, pending = false }: ChatMessageProps) {
+export function AgentChatMessage({ message, pending = false, sending = false, onSubmitChoiceForm }: ChatMessageProps) {
   if (pending) return <ThinkingOrb />
   const role = message?.role === 'user' ? 'user' : 'assistant'
   const text = getChatMessageText(message?.content || '', message?.role || 'assistant')
@@ -67,6 +70,12 @@ export function AgentChatMessage({ message, pending = false }: ChatMessageProps)
         animation="dots"
         content={content}
       />
+      {role === 'assistant' && message?.choiceForm && <ChoiceFormCard
+        form={message.choiceForm}
+        submitted={message.choiceFormSubmitted}
+        disabled={sending}
+        onSubmit={answers => onSubmitChoiceForm?.(message.choiceForm!, answers) || Promise.resolve()}
+      />}
       {role === 'assistant' && !message?.streaming && <ChatMessageMeta text={text} timestamp={message?.timestamp} />}
     </View>
   }
@@ -77,6 +86,12 @@ export function AgentChatMessage({ message, pending = false }: ChatMessageProps)
         <Text selectable>{text}</Text>
       </View>
     </View>
+    {role === 'assistant' && message?.choiceForm && <ChoiceFormCard
+      form={message.choiceForm}
+      submitted={message.choiceFormSubmitted}
+      disabled={sending}
+      onSubmit={answers => onSubmitChoiceForm?.(message.choiceForm!, answers) || Promise.resolve()}
+    />}
     {role === 'assistant' && !message?.streaming && <ChatMessageMeta text={text} timestamp={message?.timestamp} />}
   </View>
 }

@@ -708,8 +708,8 @@ export const memoryDB = {
         if (facts.length) await this.persistConfirmedFacts(input.userId, input.caseId, facts, 'conversation_confirmation', 'conversation', conversation.id)
         await this.createMessage(conversation.id, 'user', 'text', input.text, input.metadata, input.requestId, input.requestHash)
         await this.updateConversationState(conversation.id, input.agentState)
-        const result = structuredClone({ agentState: input.agentState, assistantText: input.assistantText, quickReplies: input.agentState.quickReplies || [] })
-        await this.createMessage(conversation.id, 'assistant', 'text', result.assistantText, { quickReplies: result.quickReplies, turnResult: structuredClone(result) }, input.requestId, input.requestHash)
+        const result = structuredClone({ agentState: input.agentState, assistantText: input.assistantText, quickReplies: input.agentState.quickReplies || [], ...(input.choiceForm ? { choiceForm: input.choiceForm } : {}) })
+        await this.createMessage(conversation.id, 'assistant', 'text', result.assistantText, { quickReplies: result.quickReplies, ...(result.choiceForm ? { choiceForm: result.choiceForm } : {}), turnResult: structuredClone(result) }, input.requestId, input.requestHash)
         return result
       } catch (error) {
         conversations.set(conversation.id, beforeConversation)

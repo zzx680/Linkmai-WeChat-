@@ -40,6 +40,21 @@ test('streamDeepSeek preserves UTF-8 and CRLF across every byte boundary', async
   } finally { provider.mock.restore() }
 })
 
+test('streamDeepSeek reconstructs fragmented function-call names and arguments', async () => {
+  const provider = mock.method(axios, 'post', async () => ({ data: Readable.from([
+    'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"present_choice_","arguments":"{\\"title\\":\\"请补充\\","}}]}}]}\n\n',
+    'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"form","arguments":"\\"questions\\":[{\\"title\\":\\"A\\",\\"options\\":[\\"x\\",\\"y\\"]}] }"}}]},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]\n\n',
+  ]) }))
+  try {
+    const result = await (await import('../src/services/deepseek')).streamDeepSeekResponse([], () => undefined)
+    assert.equal(result.content, '')
+    assert.deepEqual(result.toolCalls, [{
+      id: 'call_1', type: 'function',
+      function: { name: 'present_choice_form', arguments: '{"title":"请补充","questions":[{"title":"A","options":["x","y"]}] }' },
+    }])
+  } finally { provider.mock.restore() }
+})
+
 test('streamDeepSeek rejects incomplete, truncated, malformed, empty and failed streams', async () => {
   const delta = 'data: {"choices":[{"delta":{"content":"部分回复"}}]}\n\n'
   const stop = 'data: {"choices":[{"finish_reason":"stop"}]}\n\n'

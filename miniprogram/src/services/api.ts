@@ -304,12 +304,21 @@ export interface QuickReply {
   action?: string
 }
 
+export interface ChoiceForm {
+  id: string
+  title: string
+  questions: Array<{ id: string; title: string; options: string[] }>
+}
+
 export interface Message {
   id: string
   role: 'user' | 'assistant' | 'system'
   content: string
   images?: string[]
   quickReplies?: QuickReply[]
+  choiceForm?: ChoiceForm
+  choiceFormSubmitted?: boolean
+  choiceFormId?: string
   timestamp: string
   streaming?: boolean
 }
@@ -337,6 +346,7 @@ export interface ConversationHistory {
 export interface SendMessageResponse {
   message: string
   quickReplies?: QuickReply[]
+  choiceForm?: ChoiceForm
   agentState?: { stage: ConversationState; collectedFactsCount?: number }
   readiness?: ReportReadiness
 }
@@ -347,7 +357,7 @@ function normalizeMessage(message: unknown, index: number): Message {
     role?: Message['role']
     content?: string
     text?: string
-    metadata?: { images?: string[]; quickReplies?: QuickReply[] }
+    metadata?: { images?: string[]; quickReplies?: QuickReply[]; choiceForm?: ChoiceForm; choiceFormId?: string }
     images?: string[]
     quickReplies?: QuickReply[]
     timestamp?: string
@@ -359,16 +369,25 @@ function normalizeMessage(message: unknown, index: number): Message {
     content: value.content || value.text || '',
     images: value.metadata?.images || value.images || [],
     quickReplies: value.metadata?.quickReplies || value.quickReplies || [],
+    choiceForm: value.metadata?.choiceForm,
+    choiceFormId: value.metadata?.choiceFormId,
     timestamp: value.timestamp || value.createdAt || new Date().toISOString()
   }
+}
+
+function markSubmittedChoiceForms(messages: Message[]) {
+  const submittedIds = new Set(messages.flatMap(message => message.role === 'user' && message.choiceFormId ? [message.choiceFormId] : []))
+  return messages.map(message => message.choiceForm && submittedIds.has(message.choiceForm.id)
+    ? { ...message, choiceFormSubmitted: true }
+    : message)
 }
 
 export async function getConversationHistory(caseId: string): Promise<ConversationHistory> {
   const result = await request<ConversationHistory | Message[]>({
     url: `/conversations/current/messages?caseId=${encodeURIComponent(caseId)}`
   })
-  if (Array.isArray(result)) return { messages: result.map(normalizeMessage) }
-  return { ...result, messages: (result.messages || []).map(normalizeMessage) }
+  if (Array.isArray(result)) return { messages: markSubmittedChoiceForms(result.map(normalizeMessage)) }
+  return { ...result, messages: markSubmittedChoiceForms((result.messages || []).map(normalizeMessage)) }
 }
 
 export async function sendMessage(
@@ -376,12 +395,13 @@ export async function sendMessage(
   text: string,
   action?: string,
   artifactIds?: string[],
-  requestId?: string
+  requestId?: string,
+  choiceFormId?: string
 ): Promise<SendMessageResponse> {
   return request<SendMessageResponse>({
     url: '/conversations/current/messages',
     method: 'POST',
-    data: { caseId, text, action, artifactIds, requestId }
+    data: { caseId, text, action, artifactIds, requestId, choiceFormId }
   })
 }
 
@@ -395,9 +415,10 @@ export function sendMessageStream(
   artifactIds: string[] | undefined,
   requestId: string,
   onDelta: (delta: string) => void,
+  choiceFormId?: string,
 ): Promise<SendMessageResponse> {
   if (Taro.getEnv() !== Taro.ENV_TYPE.WEAPP || !Taro.canIUse('request.object.enableChunked')) {
-    return sendMessage(caseId, text, action, artifactIds, requestId)
+    return sendMessage(caseId, text, action, artifactIds, requestId, choiceFormId)
   }
   return new Promise((resolve, reject) => {
     const token = getToken()
@@ -429,7 +450,7 @@ export function sendMessageStream(
       enableChunked: true,
       dataType: 'text',
       responseType: 'text',
-      data: { caseId, text, action, artifactIds, requestId, stream: true },
+      data: { caseId, text, action, artifactIds, requestId, choiceFormId, stream: true },
       header: {
         'Content-Type': 'application/json',
         Accept: 'text/event-stream',

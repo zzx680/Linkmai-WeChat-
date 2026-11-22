@@ -5,6 +5,7 @@ import { config } from '../src/config'
 import { canGenerateReport, processUserMessage as runTurn, type AgentState, type CollectedFact } from '../src/services/agent'
 import { CONVERSATION_SYSTEM_PROMPT, conversationMessages, interpretUserMessage, type MessageInterpreter } from '../src/services/agent-language'
 import type { CaseAgentContext } from '../src/harness/case-agent'
+import { choiceFormTool, validateChoiceForm } from '../src/services/choice-form'
 
 const empty = (): AgentState => ({ stage: 'collecting', collectedFacts: [] })
 const fact = (key: string, value: string, confirmed = true): CollectedFact => ({ key, label: key, value, confirmed, source: 'user_text', confidence: 'high' })
@@ -39,9 +40,52 @@ test('provider receives one lawyer system prompt followed by native chat history
     { role: 'user', content: '没有，接下来怎么办？' },
   ])
   assert.equal(body.response_format, undefined)
-  assert.equal(body.tools, undefined)
+  assert.deepEqual(body.tools, [choiceFormTool])
   assert.ok(options.timeout <= 6500)
   assert.deepEqual(result, { facts: [], reply: '模型自然回复', status: 'model' })
+})
+
+test('choice forms are constrained to multiple neutral low-risk single-choice questions', () => {
+  const valid = validateChoiceForm({ title: '为了给你更准确的建议，请补充几项情况。', questions: [
+    { title: '事故发生时，你是？', options: ['驾驶员', '乘客', '行人', '不清楚'] },
+    { title: '事故发生后是否报警？', options: ['已报警', '尚未报警', '不清楚'] },
+  ] })
+  assert.equal(valid?.questions.length, 2)
+  assert.notEqual(valid?.id, valid?.questions[0].id)
+  assert.equal(validateChoiceForm({ title: '补充信息', questions: [{ title: '什么时候发生？', options: ['上午', '下午'] }] }), null)
+  assert.equal(validateChoiceForm({ title: '请同意', questions: [
+    { title: '是否同意授权资料给保险公司？', options: ['同意', '不同意'] },
+    { title: '是否放弃诉讼？', options: ['是', '否'] },
+  ] }), null)
+  assert.equal(validateChoiceForm({ title: '重复选项', questions: [
+    { title: '问题一', options: ['是', '是'] }, { title: '问题二', options: ['A', 'B'] },
+  ] }), null)
+  assert.equal(validateChoiceForm({ title: '后续安排', questions: [
+    { title: '问题一', options: ['选择普通方案', '同意授权律师'] }, { title: '问题二', options: ['上午', '下午'] },
+  ] }), null)
+})
+
+test('model choice tool creates a form only after validating its arguments', async () => {
+  provider.mock.mockImplementation(async (_url: unknown, _body: any) => ({ data: { choices: [{ finish_reason: 'tool_calls', message: {
+    role: 'assistant', content: '', tool_calls: [{ type: 'function', function: { name: 'present_choice_form', arguments: JSON.stringify({
+      title: '请补充几项情况', questions: [
+        { title: '事故发生时，你是？', options: ['驾驶员', '乘客', '不清楚'] },
+        { title: '事故发生后是否报警？', options: ['已报警', '尚未报警', '不清楚'] },
+      ],
+    }) } }],
+  } }] } }))
+  const result = await interpretUserMessage(empty(), '出了事故', context())
+  assert.equal(result.choiceForm?.questions.length, 2)
+  assert.match(result.reply, /下面的选项/)
+  assert.deepEqual(result.facts, [])
+  const request = provider.mock.calls.at(-1)!.arguments[1] as any
+  assert.deepEqual(request.tools, [choiceFormTool])
+  assert.equal(request.tool_choice, undefined)
+
+  provider.mock.mockImplementation(async () => ({ data: { choices: [{ finish_reason: 'tool_calls', message: {
+    role: 'assistant', content: '', tool_calls: [{ type: 'function', function: { name: 'present_choice_form', arguments: '{bad-json' } }],
+  } }] } }))
+  await assert.rejects(interpretUserMessage(empty(), '出了事故', context()), /MODEL_UNAVAILABLE/)
 })
 
 test('plain text, markdown and JSON-looking model output are preserved as text', async () => {

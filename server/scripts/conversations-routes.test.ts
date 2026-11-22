@@ -347,3 +347,55 @@ test('streaming preserves conflict semantics and rejects unauthorized requests b
     assert.equal((await request('get', {}, { caseId: own.caseId }, own.userId)).data.messages.length, 0)
   } finally { commit.mock.restore() }
 })
+
+test('choice forms are saved with the assistant turn, validate submitted options, and replay idempotently', async () => {
+  const own = await fixture()
+  const formInput = {
+    title: '请补充几项情况',
+    questions: [
+      { title: '事故发生时，你是？', options: ['驾驶员', '乘客', '不清楚'] },
+      { title: '事故发生后是否报警？', options: ['已报警', '尚未报警', '不清楚'] },
+    ],
+  }
+  const toolCall = { id: 'call-choice-1', type: 'function', function: { name: 'present_choice_form', arguments: JSON.stringify(formInput) } }
+  provider.mock.mockImplementation(async () => ({ data: Readable.from([
+    `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, ...toolCall }] } }] })}\n\n`,
+    `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'tool_calls' }] })}\n\n`,
+    'data: [DONE]\n\n',
+  ]) }))
+  const original = await request('post', { caseId: own.caseId, text: '请帮我了解情况', requestId: 'choice-form-create', stream: true }, {}, own.userId)
+  assert.equal(original.status, 200)
+  const created = original.events.at(-1).data.data
+  assert.equal(created.choiceForm.title, formInput.title)
+  assert.equal(created.choiceForm.questions.length, 2)
+  const assistantId = created.choiceForm.id
+  const callsBeforeInvalid = provider.mock.callCount()
+  const invalid = await request('post', {
+    caseId: own.caseId,
+    text: '按选择补充信息：\n事故发生时，你是？：第三方\n事故发生后是否报警？：已报警',
+    choiceFormId: assistantId,
+    requestId: 'choice-form-invalid',
+  }, {}, own.userId)
+  assert.equal(invalid.status, 400)
+  assert.equal(provider.mock.callCount(), callsBeforeInvalid)
+  assert.equal((await request('get', {}, { caseId: own.caseId }, own.userId)).data.messages.length, 2)
+
+  provider.mock.mockImplementation(async () => ({ data: { choices: [{ finish_reason: 'stop', message: { content: '收到，我会结合这些信息继续分析。' } }] } }))
+  const answerRequest = {
+    caseId: own.caseId,
+    text: '按选择补充信息：\n事故发生时，你是？：乘客\n事故发生后是否报警？：不清楚',
+    choiceFormId: assistantId,
+    requestId: 'choice-form-answer',
+  }
+  const answered = await request('post', answerRequest, {}, own.userId)
+  assert.equal(answered.status, 200)
+  assert.deepEqual(answered.data.agentState.collectedFacts, [], 'form answers do not become confirmed case facts')
+  const history = await request('get', {}, { caseId: own.caseId }, own.userId)
+  assert.equal(history.data.messages.length, 4)
+  assert.equal(history.data.messages[2].metadata.choiceFormId, assistantId)
+  const modelCalls = provider.mock.callCount()
+  const replay = await request('post', answerRequest, {}, own.userId)
+  assert.equal(replay.data.message, answered.data.message)
+  assert.equal(provider.mock.callCount(), modelCalls)
+  assert.equal((await request('get', {}, { caseId: own.caseId }, own.userId)).data.messages.length, 4)
+})
