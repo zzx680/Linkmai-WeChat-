@@ -197,7 +197,7 @@ export default function CasePage() {
         <View className="workbench-card-header">
           <View className="workbench-icon"><Icon name={isLoggedOut ? 'user-round' : isEmpty ? 'file-text' : nextStep === 'continue_materials' ? 'folder-open' : nextStep === 'view_report' ? 'circle-check' : 'route'} size={nextStep === 'continue_materials' ? 14 : 26} color={nextStep === 'continue_materials' ? '#000000' : '#2A64F0'} /></View>
           <View className="workbench-heading">
-            <View className="status-pill"><Text className={nextStep === 'continue_materials' ? 'home-card-label' : undefined}>{isLoggedOut ? '账户登录' : isEmpty ? '新建案件' : detail.badge}</Text></View>
+            <View className="status-pill"><Text className={nextStep === 'continue_materials' ? 'home-card-label' : undefined}>{isLoggedOut ? '账户登录' : isEmpty ? '新建案件' : currentCase?.entitlement?.billingEnabled === false && detail.badge === '已解锁' ? '免费使用' : detail.badge}</Text></View>
           </View>
         </View>
         <Text className="workbench-title workbench-standalone-title">{isLoggedOut ? '登录后开始处理事故' : isEmpty ? '创建你的第一个案件' : detail.title}</Text>
@@ -211,7 +211,7 @@ export default function CasePage() {
           <View className="payment-note"><Icon name="shield-check" size={18} color="#2A64F0" /><Text>一次付费，仅解锁当前案件；后续更新不再收费</Text></View>
         )}
         {hasCase && nextStep === 'continue_case' && (
-          <View className="unlocked-note"><Icon name="circle-check" size={18} color="#059669" /><Text>本案件已解锁完整处理方案</Text></View>
+          <View className="unlocked-note"><Icon name="circle-check" size={18} color="#059669" /><Text>{currentCase?.entitlement?.billingEnabled === false ? '完整处理方案当前免费使用' : '本案件已解锁完整处理方案'}</Text></View>
         )}
 
         <View id="guide-create-case" className={`primary-action${isCreating || isPaying ? ' primary-action-disabled' : ''}`} onClick={handlePrimaryAction}>
@@ -226,7 +226,7 @@ export default function CasePage() {
           <View className="case-summary">
             <View className="summary-item"><Text className="summary-value">{materials.length || currentCase?.materialCount || 0}</Text><Text className="summary-label">材料份数</Text></View>
             <View className="summary-item"><Text className="summary-value">{confirmedCount}</Text><Text className="summary-label">已确认材料</Text></View>
-            <View className="summary-item summary-plan" onClick={currentCase?.hasReport ? goToReport : () => Taro.navigateTo({ url: '/pages/payments/index' })} role="button" hoverClass="summary-plan-pressed">
+            <View className="summary-item summary-plan" onClick={currentCase?.hasReport || currentCase?.entitlement?.billingEnabled === false ? goToReport : () => Taro.navigateTo({ url: '/pages/payments/index' })} role="button" hoverClass="summary-plan-pressed">
               <View className="summary-plan-status"><Text className="summary-value">{currentCase?.hasReport ? '已生成' : '处理中'}</Text><Icon name="chevron-right" size={14} color="#2A64F0" /></View>
               <Text className="summary-label">完整方案</Text>
             </View>

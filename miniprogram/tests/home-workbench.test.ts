@@ -178,6 +178,13 @@ describe('home workbench state', () => {
     assert.equal(getCaseNextStep({ currentCase: makeCase({ hasReport: true, entitlement: { status: 'paid', amountCents: 4990, currency: 'CNY' } }), materials: [makeMaterial(true)], conversationState: 'ready' }), 'view_report')
   })
 
+  it('opens the free case workflow without sending users to payment', () => {
+    const freeCase = makeCase({ entitlement: { status: 'unpaid', active: true, billingEnabled: false, amountCents: 1980, currency: 'CNY' }, nextAction: 'continue_case' })
+    assert.equal(getCaseNextStep({ currentCase: freeCase, materials: [makeMaterial(true)], conversationState: 'ready' }), 'continue_case')
+    assert.deepEqual(clickHomePrimaryAction(freeCase, 'summary'), ['/pages/report/index?caseId=case-1'])
+    assert.equal(getHomeStepDetail('continue_case', 1).badge, '已解锁')
+  })
+
   it('opens payment from the processing summary and reports only after generation', () => {
     assert.deepEqual(clickHomePrimaryAction(makeCase(), 'summary'), ['/pages/payments/index'])
     assert.deepEqual(clickHomePrimaryAction(makeCase({ hasReport: true }), 'summary'), ['/pages/report/index?caseId=case-1'])

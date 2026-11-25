@@ -11,6 +11,7 @@ function respondWithError(res: express.Response, err: unknown) {
   const code = (err as Error).message
   const known: Record<string, { status: number; message: string }> = {
     CASE_NOT_FOUND: { status: 404, message: '未找到案件' },
+    BILLING_DISABLED: { status: 403, message: '当前案件处理服务免费开放，暂不支持创建付费订单' },
     ORDER_NOT_FOUND: { status: 404, message: '未找到支付订单' },
     PAYMENT_PROVIDER_NOT_CONFIGURED: { status: 503, message: '支付服务暂不可用' },
     ORDER_EXPIRED: { status: 410, message: '支付订单已过期，请重新创建' },

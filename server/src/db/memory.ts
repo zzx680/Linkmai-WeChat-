@@ -580,7 +580,7 @@ export const memoryDB = {
     const currentCase = cases.get(run.caseId)
     if (!currentCase || currentCase.userId !== input.userId) throw new Error('CASE_NOT_FOUND')
     const entitlement = entitlements.get(run.caseId)
-    if (entitlement?.status !== 'paid' || (entitlement.expiresAt && entitlement.expiresAt.getTime() <= Date.now())) throw new Error('PAYMENT_REQUIRED')
+    if (config.payment.billingEnabled && (entitlement?.status !== 'paid' || (entitlement.expiresAt && entitlement.expiresAt.getTime() <= Date.now()))) throw new Error('PAYMENT_REQUIRED')
     const inputs = [...artifacts.values()].filter(item => item.caseId === run.caseId)
     if (materialSnapshot(inputs) !== input.materialSnapshot) throw new Error('REPORT_STALE')
     if (currentCase.inputRevision !== run.inputRevision) {

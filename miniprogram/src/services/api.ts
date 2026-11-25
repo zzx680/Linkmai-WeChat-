@@ -186,6 +186,7 @@ export function submitPrivacyRequest(kind: PrivacyRequestKind): Promise<PrivacyR
 export interface CaseEntitlement {
   status: 'unpaid' | 'pending' | 'paid' | 'refunded'
   active?: boolean
+  billingEnabled?: boolean
   amountCents: number
   currency: string
   currentPrice?: { amountCents: number; currency: string }

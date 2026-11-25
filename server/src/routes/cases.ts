@@ -19,6 +19,7 @@ async function withEntitlement(caseData: any, userId: string) {
     entitlement: {
       status: entitlement?.status || 'unpaid',
       active: paid,
+      billingEnabled: config.payment.billingEnabled,
       amountCents: entitlement?.amountCents || config.payment.amountCents,
       currency: entitlement?.currency || config.payment.currency,
       paidAt: entitlement?.paidAt || null,

@@ -63,9 +63,10 @@ function CasePaymentPanel() {
   })
 
   const entitlement = currentCase?.entitlement
-  const price = formatPaymentPrice(entitlement)
-  const priceChanged = hasPaymentPriceChange(entitlement)
-  const status = entitlement?.status === 'paid' || entitlement?.status === 'refunded'
+  const billingEnabled = entitlement?.billingEnabled !== false
+  const price = billingEnabled ? formatPaymentPrice(entitlement) : null
+  const priceChanged = billingEnabled && hasPaymentPriceChange(entitlement)
+  const status = !billingEnabled ? 'paid' : entitlement?.status === 'paid' || entitlement?.status === 'refunded'
     ? entitlement.status : confirmation === 'failed' ? 'unpaid' : confirmation || entitlement?.status || 'unpaid'
   const isPaid = status === 'paid'
   const features = Object.entries(FEATURE_DETAILS)
@@ -83,8 +84,8 @@ function CasePaymentPanel() {
       <View className="case-payment-panel centered-page">
         <View className="empty-card">
           <View className="empty-icon"><Icon name="user-round" size={30} color="#2A64F0" /></View>
-          <Text className="empty-title">登录后查看付费权益</Text>
-          <Text className="empty-description">登录后可查看当前案件的解锁状态，并继续完成支付</Text>
+          <Text className="empty-title">登录后查看案件方案</Text>
+          <Text className="empty-description">登录后可保存案件进度并继续使用完整处理方案</Text>
           <View className="primary-button" onClick={() => retryAuth()}><Text>{authRetryable ? '重新登录' : '登录'}</Text></View>
         </View>
       </View>
@@ -104,8 +105,8 @@ function CasePaymentPanel() {
       <View className="case-payment-panel centered-page">
         <View className="empty-card">
           <View className="empty-icon"><Icon name="file-text" size={30} color="#2A64F0" /></View>
-          <Text className="empty-title">暂无可查看的付费权益</Text>
-          <Text className="empty-description">创建案件并整理材料后，可以按案件一次性解锁完整处理方案</Text>
+          <Text className="empty-title">暂无可查看的案件方案</Text>
+          <Text className="empty-description">创建案件并整理材料后，即可免费使用完整处理方案</Text>
           <View className="primary-button" onClick={goHome}><Text>返回首页创建案件</Text></View>
           <View className="secondary-button" onClick={refresh}><Text>重新加载</Text></View>
         </View>
@@ -116,7 +117,7 @@ function CasePaymentPanel() {
   const isPending = status === 'pending'
   const isRefunded = status === 'refunded'
   const paidAt = formatPaidAt(entitlement?.paidAt)
-  const canPay = !isPaid && !isPending && !isRefunded && !!price
+  const canPay = billingEnabled && !isPaid && !isPending && !isRefunded && !!price
 
   return (
     <View className="case-payment-panel">
@@ -128,16 +129,16 @@ function CasePaymentPanel() {
       <View className={`plan-card plan-card-${status}`}>
         <View className="plan-card-content">
           <View className="plan-topline">
-            <Text className="plan-kicker">单次案件解决方案</Text>
+            <Text className="plan-kicker">{billingEnabled ? '单次案件解决方案' : '案件处理方案'}</Text>
             <View className="status-pill">
               <Icon name={isPaid ? 'check' : isRefunded ? 'undo-2' : 'clock-3'} size={14} color="#111827" />
-              <Text>{entitlementLabel(status)}</Text>
+              <Text>{billingEnabled ? entitlementLabel(status) : '免费使用'}</Text>
             </View>
           </View>
           <View className="plan-price-row">
             <View className="plan-price-copy">
-              <Text className="plan-price-label">{isPaid ? '实付金额' : isRefunded ? '原订单金额' : '一次性解锁'}</Text>
-              <Text className="plan-price">{price || '金额待确认'}</Text>
+              <Text className="plan-price-label">{billingEnabled ? isPaid ? '实付金额' : isRefunded ? '原订单金额' : '一次性解锁' : '当前费用'}</Text>
+              <Text className="plan-price">{billingEnabled ? price || '金额待确认' : '免费'}</Text>
             </View>
             <View className="plan-mark"><Icon name={isPaid ? 'circle-check' : 'shield-check'} size={30} color="#FFFFFF" /></View>
           </View>
@@ -147,7 +148,7 @@ function CasePaymentPanel() {
       {(isPaid || isPending || isRefunded || !price) && (
         <View className={`status-panel${isPaid ? ' status-panel-success' : isRefunded || !price ? ' status-panel-muted' : ''}`}>
           <Icon name={isPaid ? 'circle-check' : isRefunded ? 'undo-2' : !price ? 'info' : 'clock-3'} size={20} color={isPaid ? '#057A55' : isRefunded || !price ? '#6B7280' : '#2A64F0'} />
-          <Text>{isPaid
+          <Text>{!billingEnabled ? '当前案件的处理、测算与报告功能免费开放。历史订单和已付款记录继续保留。' : isPaid
             ? `本案件已解锁，后续更新不再收费${paidAt ? ` · ${paidAt}` : ''}`
             : isRefunded ? '该订单已退款，相关付费权益已失效'
               : !price ? '暂未取得有效金额，请稍后重新加载'
@@ -186,7 +187,7 @@ function CasePaymentPanel() {
           <Button className={`secondary-button${isPaying || isLoading ? ' button-disabled' : ''}`} disabled={isPaying || isLoading} onClick={refresh}><Text>{isPaying || isLoading ? '正在确认...' : '刷新支付结果'}</Text></Button>
         </>}
         {isPaid && <Button className="primary-button" onClick={goNext}><Text>{currentCase.hasReport ? '查看完整方案' : '继续处理案件'}</Text></Button>}
-        {(isRefunded || !price) && <Button className="secondary-button" onClick={refresh}><Text>重新加载</Text></Button>}
+        {billingEnabled && (isRefunded || !price) && <Button className="secondary-button" onClick={refresh}><Text>重新加载</Text></Button>}
       </View>
 
     </View>

@@ -85,9 +85,10 @@ export default function Report() {
   const confirmedMaterials = materials.filter(material => material.confirmed)
   const confirmedFieldsCount = confirmedMaterials.reduce((total, material) => total + material.fields.length, 0)
 
-  if (harnessStatus === 'enabled' && currentCase && currentCase.entitlement?.status === 'paid') return <CaseWorkflow key={currentCase.id} caseId={currentCase.id} />
+  const billingEnabled = currentCase?.entitlement?.billingEnabled !== false
+  if (harnessStatus === 'enabled' && currentCase && (!billingEnabled || currentCase.entitlement?.status === 'paid')) return <CaseWorkflow key={currentCase.id} caseId={currentCase.id} />
 
-  if (harnessStatus === 'unknown' && currentCase?.entitlement?.status === 'paid' && !currentReport) { return <View className="report-page"><Text className="muted-text">正在连接案件工作流…</Text><Text className="workflow-choice" onClick={refreshProgress}>重新连接</Text></View> }
+  if (harnessStatus === 'unknown' && currentCase && (!billingEnabled || currentCase.entitlement?.status === 'paid') && !currentReport) { return <View className="report-page"><Text className="muted-text">正在连接案件工作流…</Text><Text className="workflow-choice" onClick={refreshProgress}>重新连接</Text></View> }
 
   if (isGeneratingReport) {
     return (
@@ -108,7 +109,7 @@ export default function Report() {
     )
   }
 
-  if (currentCase && currentCase.entitlement?.status !== 'paid') {
+  if (currentCase && billingEnabled && currentCase.entitlement?.status !== 'paid') {
     return (
       <View className="report-page">
         <View className="page-header">

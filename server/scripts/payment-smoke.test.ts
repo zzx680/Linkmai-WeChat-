@@ -1,7 +1,26 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { config } from '../src/config'
 import { memoryDB } from '../src/db/memory'
-import { getEntitlement, requirePaidEntitlement } from '../src/services/payment'
+import { createCasePaymentOrder, getEntitlement, requirePaidEntitlement } from '../src/services/payment'
+
+test('free billing mode grants case access and rejects new payment orders', async () => {
+  const billingEnabled = config.payment.billingEnabled
+  config.payment.billingEnabled = false
+  try {
+    const user = await memoryDB.createUser(`free-case-${Date.now()}`)
+    const caseData = await memoryDB.createCase(user.id, '免费使用回归测试')
+    const entitlement = await getEntitlement(user.id, caseData.id)
+    assert.equal(entitlement.status, 'unpaid')
+    assert.equal(entitlement.active, true)
+    assert.equal(entitlement.billingEnabled, false)
+    assert.equal(entitlement.features.fullReport, true)
+    assert.equal((await requirePaidEntitlement(user.id, caseData.id)).active, true)
+    await assert.rejects(createCasePaymentOrder(user.id, caseData.id, user.openid), { message: 'BILLING_DISABLED' })
+  } finally {
+    config.payment.billingEnabled = billingEnabled
+  }
+})
 
 test('payment order is idempotent and grants entitlement only after payment', async () => {
   const user = await memoryDB.createUser(`payment-test-${Date.now()}`)

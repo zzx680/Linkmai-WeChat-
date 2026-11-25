@@ -44,10 +44,10 @@
 | 环境文件 | `/etc/linkmai/staging.env` | `/etc/linkmai/production.env` |
 | 数据库 | 本机 PostgreSQL，独立测试库与账号 | 本机 PostgreSQL，独立正式库与账号 |
 | 数据库连接 | loopback，`POSTGRES_SSL=false` | loopback，`POSTGRES_SSL=false` |
-| 支付配置（部署目标） | 微信支付，1 分 | 微信支付，1980 分 |
+| 收费开关 | 关闭（免费使用） | 关闭（免费使用） |
 | 小程序输出 | `miniprogram/dist-staging/` | `miniprogram/dist/` |
 
-当前售价默认为 1980 分（¥19.80）；上线时需将 `/etc/linkmai/production.env` 中的 `PAYMENT_AMOUNT_CENTS` 设为 `1980`，重新加载服务环境并验证权益接口的 `currentPrice` 与新订单金额，代码默认值不会覆盖已有环境配置。首页及支付页对未解锁案件展示 `currentPrice`；旧待支付订单只有在微信确认未付款且关单成功后，才按现价创建新订单。正在支付或状态不明时不重下单；已付款及退款记录保留原交易金额。staging 保持 1 分测试价。
+当前 `BILLING_ENABLED=false`，案件处理台、测算和报告免费使用，后端拒绝新建付费订单；历史订单与已付款/退款记录保留并可查询。需要恢复收费时，必须显式设置目标环境的 `BILLING_ENABLED=true`，并重新完成价格、支付和发布验收；仅调整 `PAYMENT_AMOUNT_CENTS` 不会重新启用收费。
 
 Nginx 已配置上述域名分别转发至 8100、8200；检查配置不等于已完成 TLS、接口或业务验收。两环境数据库目标、账号和 JWT 不同，但 OSS Bucket 相同，不能宣称存储完全隔离。2026-10-17 记录了负责人允许复用部分外部服务凭据；共享资源的清理、生命周期和权限变化必须核对对两环境的影响，不得对共享 Bucket 整体清理。后续资源隔离单独安排，不在发布时静默切换。
 

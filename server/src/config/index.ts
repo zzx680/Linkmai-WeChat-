@@ -65,6 +65,9 @@ export const config = {
     timeoutMs: parseInt(process.env.DEEPSEEK_TIMEOUT_MS || '30000', 10),
   },
   payment: {
+    // Billing is temporarily opt-in. Tests keep the historic paid flow unless
+    // explicitly disabled; staging/production are free unless an operator turns it on.
+    billingEnabled: process.env.BILLING_ENABLED === undefined ? nodeEnv === 'test' : process.env.BILLING_ENABLED === 'true',
     amountCents: Number(process.env.PAYMENT_AMOUNT_CENTS || '1980'),
     currency: process.env.PAYMENT_CURRENCY || 'CNY',
     orderExpiresMinutes: Number(process.env.PAYMENT_ORDER_EXPIRES_MINUTES || '15'),

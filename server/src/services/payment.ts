@@ -14,6 +14,7 @@ const entitlementFeatures = (active: boolean) => ({
 // A paid grant is only usable while it has not expired. Rows created before the
 // delivery model existed have no expiry and therefore stay active indefinitely.
 export function entitlementActive(entitlement?: { status: string; expiresAt?: Date | null } | null): boolean {
+  if (!config.payment.billingEnabled) return true
   if (!entitlement || entitlement.status !== 'paid') return false
   return !entitlement.expiresAt || entitlement.expiresAt.getTime() > Date.now()
 }
@@ -28,13 +29,14 @@ export async function getEntitlement(userId: string, caseId: string) {
     caseId,
     status,
     active,
+    billingEnabled: config.payment.billingEnabled,
     amountCents: entitlement?.amountCents || config.payment.amountCents,
     currency: entitlement?.currency || config.payment.currency,
     currentPrice: { amountCents: config.payment.amountCents, currency: config.payment.currency },
     paidAt: entitlement?.paidAt || null,
     expiresAt: entitlement?.expiresAt || null,
     reviewQuotaRemaining: entitlement?.reviewQuotaRemaining ?? 0,
-    source: entitlement?.source || 'purchase',
+    source: entitlement?.source || (config.payment.billingEnabled ? 'purchase' : 'free'),
     features: entitlementFeatures(active),
   }
 }
@@ -176,13 +178,14 @@ function paymentOrderResponse(order: PaymentOrder, entitlement: Awaited<ReturnTy
 }
 
 export async function createCasePaymentOrder(userId: string, caseId: string, openid: string, idempotencyKey?: string) {
-  if (config.payment.provider === 'disabled') throw new Error('PAYMENT_PROVIDER_NOT_CONFIGURED')
   const caseData = await db.findCaseById(userId, caseId)
   if (!caseData) throw new Error('CASE_NOT_FOUND')
   const entitlement = await db.getCaseEntitlement(userId, caseId)
   if (entitlement?.status === 'paid') {
     return { alreadyPaid: true as const, entitlement: await getEntitlement(userId, caseId) }
   }
+  if (!config.payment.billingEnabled) throw new Error('BILLING_DISABLED')
+  if (config.payment.provider === 'disabled') throw new Error('PAYMENT_PROVIDER_NOT_CONFIGURED')
 
   let existing = idempotencyKey
     ? await db.findPaymentOrderByIdempotency(userId, caseId, idempotencyKey)

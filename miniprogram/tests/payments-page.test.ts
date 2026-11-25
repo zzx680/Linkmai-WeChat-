@@ -30,6 +30,7 @@ function renderPage(options: {
   amountCents?: number
   currentPrice?: CaseEntitlement['currentPrice']
   features?: CaseEntitlement['features']
+  billingEnabled?: boolean
 } = {}) {
   const state = {
     isLoggedIn: options.loggedIn ?? true,
@@ -41,6 +42,7 @@ function renderPage(options: {
       hasReport: true,
       entitlement: {
         status: options.status ?? 'unpaid',
+        billingEnabled: options.billingEnabled,
         amountCents: options.amountCents ?? 1980,
         currency: 'CNY',
         currentPrice: options.currentPrice,
@@ -105,8 +107,8 @@ describe('payment page rendering', () => {
   })
 
   it('renders the login and missing-case states', () => {
-    assert.match(renderPage({ loggedIn: false, hasCase: false }), /登录后查看付费权益/)
-    assert.match(renderPage({ hasCase: false }), /暂无可查看的付费权益/)
+    assert.match(renderPage({ loggedIn: false, hasCase: false }), /登录后查看案件方案/)
+    assert.match(renderPage({ hasCase: false }), /暂无可查看的案件方案/)
     assert.match(renderPage({ hasCase: false }), /查看订单记录/)
     assert.doesNotMatch(renderPage({ loggedIn: false }), /查看订单记录/)
   })
@@ -118,6 +120,16 @@ describe('payment page rendering', () => {
     const refunded = renderPage({ status: 'refunded' })
     assert.match(refunded, /相关付费权益已失效/)
     assert.doesNotMatch(refunded, /立即解锁/)
+  })
+
+  it('keeps the plan page but presents the current service as free without a payment action', () => {
+    const html = renderPage({ billingEnabled: false })
+    assert.match(html, /案件处理方案/)
+    assert.match(html, /免费使用/)
+    assert.match(html, /当前案件的处理、测算与报告功能免费开放/)
+    assert.match(html, /查看完整方案/)
+    assert.doesNotMatch(html, /¥19\.80|立即解锁|继续支付/)
+    assert.doesNotMatch(html, /重新加载/)
   })
 
   it('shows the current price for an old unpaid order in both the card and payment button', () => {

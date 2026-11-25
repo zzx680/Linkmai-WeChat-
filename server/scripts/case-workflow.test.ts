@@ -5,6 +5,7 @@ import type { Fact } from '../src/harness/types'
 process.env.DB_TYPE = 'memory'
 process.env.NODE_ENV = 'test'
 const { memoryDB: db } = require('../src/db/memory') as typeof import('../src/db/memory')
+const { config } = require('../src/config') as typeof import('../src/config')
 const { WorkflowStore, id } = require('../src/harness/store') as typeof import('../src/harness/store')
 const { HarnessService } = require('../src/harness/service') as typeof import('../src/harness/service')
 const { calculate, yuanToCents, integerInput, expenseDefinitions, fingerprint } = require('../src/harness/calculator') as typeof import('../src/harness/calculator')
@@ -59,6 +60,24 @@ async function generate(f: Awaited<ReturnType<typeof fixture>>) {
   await service.complete(f.userId,f.caseId,run.runId,claim.run.leaseToken!)
   return (await service.get(f.userId,f.caseId)).documents.find(d => d.type === 'case_report' && d.status === 'draft')!
 }
+
+test('free billing mode allows calculation and report drafting for unpaid or refunded cases', async () => {
+  const billingEnabled = config.payment.billingEnabled
+  config.payment.billingEnabled = false
+  try {
+    const f = await fixture()
+    f.entitlement.status = 'refunded'
+    const calculation = await service.calculate(f.userId, f.caseId)
+    assert.equal(calculation.status, 'complete')
+    const run = await service.enqueue(f.userId, f.caseId)
+    const claimed = await service.claim(f.userId, f.caseId, 'free-test-worker')
+    assert.ok(claimed)
+    await service.complete(f.userId, f.caseId, run.runId, claimed.run.leaseToken!)
+    assert.equal((await service.get(f.userId, f.caseId)).documents.length, 3)
+  } finally {
+    config.payment.billingEnabled = billingEnabled
+  }
+})
 
 test('worker idempotency, concurrent claim, crash recovery and fencing', async () => {
   const f = await fixture(), now = Date.now()

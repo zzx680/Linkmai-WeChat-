@@ -47,17 +47,18 @@ export function getHomeMode({ isLoggedIn, isLoadingCase, caseLoadError, currentC
 
 export function getCaseNextStep({ currentCase, materials, conversationState }: CaseNextStepInput): HomeNextStep {
   const entitlement = currentCase.entitlement
-  const isPaid = entitlement?.status === 'paid'
+  const billingEnabled = entitlement?.billingEnabled !== false
+  const isPaid = !billingEnabled || entitlement?.active === true || entitlement?.status === 'paid'
   const status = currentCase.status.toLowerCase()
   const serverAction = String(currentCase.nextAction || '')
 
   if (isPaid && currentCase.hasReport) return 'view_report'
-  if (entitlement?.status === 'refunded') return 'view_refund_status'
+  if (billingEnabled && entitlement?.status === 'refunded') return 'view_refund_status'
   if (conversationState === 'analyzing' || /analy[sz]ing|processing/.test(status)) return 'view_processing'
-  if (entitlement?.status === 'pending') return 'view_payment_status'
+  if (billingEnabled && entitlement?.status === 'pending') return 'view_payment_status'
   if (serverAction === 'confirm_materials' || conversationState === 'confirming') return 'confirm_materials'
   if (serverAction === 'continue_materials') return 'continue_materials'
-  if (serverAction === 'unlock_full_plan' || (!isPaid && conversationState === 'ready')) return 'unlock_full_plan'
+  if (billingEnabled && (serverAction === 'unlock_full_plan' || (!isPaid && conversationState === 'ready'))) return 'unlock_full_plan'
   if (isPaid && serverAction === 'view_report' && currentCase.hasReport) return 'view_report'
   if (isPaid) return 'continue_case'
   if (materials.length === 0 && currentCase.materialCount === 0) return 'continue_materials'

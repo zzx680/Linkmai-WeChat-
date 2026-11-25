@@ -32,7 +32,7 @@ export type CaseCommand<T> = (state: Workspace, sources: Sources, control: Contr
 
 // A paid grant is only usable until it expires; rows without an expiry stay active.
 const paidRow = (row: { status?: string; expires_at?: Date | string | null } | undefined) =>
-  row?.status === 'paid' && (!row.expires_at || new Date(row.expires_at).getTime() > Date.now())
+  !config.payment.billingEnabled || (row?.status === 'paid' && (!row.expires_at || new Date(row.expires_at).getTime() > Date.now()))
 
 export class WorkflowStore {
   constructor(private readonly usePostgres = config.database.type === 'postgres') {}
@@ -43,7 +43,7 @@ export class WorkflowStore {
       const state = clone(memory.get(caseId) || empty(caseId, item.inputRevision))
       const before = item.inputRevision
       const entitlement = await db.getOrCreateCaseEntitlement(userId, caseId)
-      const sources: Sources = { revision: before, paid: entitlement?.status === 'paid',
+      const sources: Sources = { revision: before, paid: paidRow(entitlement ? { status: entitlement.status, expires_at: entitlement.expiresAt } : undefined),
         facts: await db.getCaseFacts(caseId), artifacts: await db.getArtifactsByCase(caseId),
         getLegalReferences: refs => db.getLegalReferences(refs) }
       await this.loadMemoryLegal()
