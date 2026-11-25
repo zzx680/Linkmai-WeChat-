@@ -35,7 +35,6 @@ export async function getEntitlement(userId: string, caseId: string) {
     currentPrice: { amountCents: config.payment.amountCents, currency: config.payment.currency },
     paidAt: entitlement?.paidAt || null,
     expiresAt: entitlement?.expiresAt || null,
-    reviewQuotaRemaining: entitlement?.reviewQuotaRemaining ?? 0,
     source: entitlement?.source || (config.payment.billingEnabled ? 'purchase' : 'free'),
     features: entitlementFeatures(active),
   }

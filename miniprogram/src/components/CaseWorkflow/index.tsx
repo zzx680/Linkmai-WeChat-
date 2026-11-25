@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import Taro, { useDidShow, useDidHide } from '@tarojs/taro'
 import { workflowApi, WorkflowWorkspace } from '../../services/workflow'
 import { useAppStore } from '../../store'
-import { ensureCaseDataConsent, ensureReviewConsent } from '../../utils/privacy-consent'
+import { ensureCaseDataConsent } from '../../utils/privacy-consent'
 import { useReportNotification } from '../../hooks/useReportNotification'
 import './index.scss'
 
@@ -24,7 +24,7 @@ const yesNo = [{label:'是',value:'yes'}, {label:'否',value:'no'}]
 const injuryOptions = [{label:'无人受伤',value:'none'},{label:'轻微伤情',value:'minor'},{label:'严重伤情',value:'serious'},{label:'尚未确定',value:'unknown'}]
 const regions = [['北京','CN-BJ'],['天津','CN-TJ'],['河北','CN-HE'],['山西','CN-SX'],['内蒙古','CN-NM'],['辽宁','CN-LN'],['吉林','CN-JL'],['黑龙江','CN-HL'],['上海','CN-SH'],['江苏','CN-JS'],['浙江','CN-ZJ'],['浙江·杭州','CN-ZJ-HZ'],['安徽','CN-AH'],['福建','CN-FJ'],['江西','CN-JX'],['山东','CN-SD'],['河南','CN-HA'],['湖北','CN-HB'],['湖南','CN-HN'],['广东','CN-GD'],['广西','CN-GX'],['海南','CN-HI'],['重庆','CN-CQ'],['四川','CN-SC'],['贵州','CN-GZ'],['云南','CN-YN'],['西藏','CN-XZ'],['陕西','CN-SN'],['甘肃','CN-GS'],['青海','CN-QH'],['宁夏','CN-NX'],['新疆','CN-XJ']]
 const displayValue = (key: string,value: string) => key === 'injury_severity' ? injuryOptions.find(o => o.value === value)?.label || value : key === 'jurisdiction' ? regions.find(r => r[1] === value)?.[0] || value : ['yes','no'].includes(value) ? yesNo.find(o => o.value === value)!.label : value
-const statuses: Record<string,string> = { proposed:'待确认', confirmed:'已确认', disputed:'有冲突', rejected:'已拒绝', draft:'待确认草稿', user_confirmed:'已确认', lawyer_review:'待律师审核', approved:'已批准', stale:'已失效', superseded:'已有新版本', pending:'待分配', in_review:'审核中', returned:'已退回', queued:'等待处理', running:'处理中', failed:'处理失败', succeeded:'处理完成', complete:'输入齐备', incomplete:'待补充', requires_review:'需复核依据' }
+const statuses: Record<string,string> = { proposed:'待确认', confirmed:'已确认', disputed:'有冲突', rejected:'已拒绝', draft:'待你核对', user_confirmed:'已确认', approved:'已确认', stale:'已失效', superseded:'已有新版本', queued:'等待处理', running:'处理中', failed:'处理失败', succeeded:'处理完成', complete:'输入齐备', incomplete:'待补充', requires_review:'需谨慎核验' }
 const documentTitles: Record<string,string> = { case_report:'事故分析报告', evidence_catalog:'证据目录', action_plan:'材料补充清单与行动计划' }
 const yuan = (value: number) => `${Math.floor(value / 100)}.${String(value % 100).padStart(2,'0')}`
 
@@ -54,7 +54,6 @@ export default function CaseWorkflow({ caseId }: { caseId: string }) {
         if (!active) return
         setWorkspace(result)
         const activeWork = result.runs.some(run => ['queued','running'].includes(run.status))
-          || result.reviews.some(review => ['pending','in_review'].includes(review.status))
         if (activeWork && ++attempts < 60) timer = setTimeout(refresh, 2000)
       } catch (err) { if (active) setError(err instanceof Error ? err.message : '暂时无法加载案件文书') }
     }
@@ -142,7 +141,7 @@ export default function CaseWorkflow({ caseId }: { caseId: string }) {
           setValue('')
         })}><Text>{busy ? '处理中…' : '添加待确认信息'}</Text></View>
       </View>
-      <View className="workflow-card"><Text className="workflow-card-title">文书与审核</Text>
+      <View className="workflow-card"><Text className="workflow-card-title">AI 咨询整理</Text>
         {workspace.runs.slice(-1).map(run => <Text key={run.id} className="workflow-label">{statuses[run.status]}{run.safeErrorCode ? ' · 请核对信息后重试' : ''}</Text>)}
         {workspace.runs.slice(-1).filter(run => run.status === 'failed').map(run => <Text key={run.id} className="workflow-choice" onClick={() => void act(() => workflowApi.retry(caseId,run.id))}>核对信息后重新运行</Text>)}
         {reportNotification.enabled && <Button className="workflow-notification-button" loading={reportNotification.isSubscribing} disabled={reportNotification.isSubscribing || Boolean(reportNotification.subscriptionId)} onClick={() => void reportNotification.subscribe()}>
@@ -157,13 +156,10 @@ export default function CaseWorkflow({ caseId }: { caseId: string }) {
         }}><Text>生成报告、证据目录与行动计划</Text></View>
         {activeDocuments.map(doc => <View key={doc.id} className="workflow-document"><Text className="workflow-document-title">{documentTitles[doc.type]} · v{doc.version}</Text><Text className="workflow-label">{statuses[doc.status]}</Text>
           {doc.sections.map((section,index) => <View key={index}><Text className="workflow-section-title">{section.title}</Text>{section.paragraphs.map((paragraph,n) => <Text key={n} className="workflow-body">{paragraph}</Text>)}</View>)}
-          {doc.status === 'draft' && !workspace.reviews.some(task => task.documentId === doc.id && task.status === 'returned') && <View className="workflow-button secondary" onClick={() => void act(async () => {
-            const userId = useAppStore.getState().user?.id
-            if (!userId || !await ensureReviewConsent(userId)) throw new Error('尚未同意人工复核')
-            if (useAppStore.getState().currentCase?.id !== caseId || useAppStore.getState().user?.id !== userId) throw new Error('案件或账号已切换，请重新操作')
+          {doc.riskReasons.length > 0 && <Text className="workflow-muted">AI 已整理出需要谨慎核验的事项。灵迈提供 AI 咨询，不提供律师人工审核；请结合原始材料判断，必要时自行咨询执业律师。</Text>}
+          {doc.status === 'draft' && <View className="workflow-button secondary" onClick={() => void act(async () => {
             await workflowApi.confirm(caseId,doc.id)
-          })}><Text>已核对草稿，确认并继续</Text></View>}
-          {workspace.reviews.filter(task => task.documentId === doc.id).map(task => <View key={task.id} className="workflow-review"><Text>人工复核：{statuses[task.status]}</Text><Text className="workflow-muted">目标处理时间：{new Date(task.dueAt).toLocaleString('zh-CN')}；超时可联系服务支持，系统不会自动批准。</Text>{task.note && <Text className="workflow-body">审核意见：{task.note}</Text>}{task.returnItems?.map((item,n) => <Text key={n} className="workflow-body">待修改：{item}</Text>)}{task.status === 'returned' && <Text className="workflow-choice" onClick={() => void act(async () => { await workflowApi.revise(caseId,doc.id); await workflowApi.generate(caseId) })}>核对退回事项后生成新版本</Text>}</View>)}
+          })}><Text>我已核对 AI 整理内容</Text></View>}
         </View>)}
         {!!workspace.documents.filter(doc => doc.status === 'stale').length && <Text className="workflow-muted">输入或规则更新后，旧版本已失效。请生成当前版本。</Text>}
       </View>

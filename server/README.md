@@ -35,7 +35,7 @@ staging/production 配置保存在服务器外部环境文件，客户端不持�
 
 - [云服务配置](docs/ALIYUN_SETUP.md)
 - [OSS 上传链路](docs/OSS_INTEGRATION.md)
-- [案件计算、文书与律师审核](docs/CASE_WORKFLOW_OPERATIONS.md)
+- AI 案件咨询与报告流程不提供平台内律师人工审核；高风险事项由 AI 明确提示用户自行咨询执业律师。
 - [数据申请处理](docs/PRIVACY_REQUESTS.md)
 
 P1 总结、API 交接和日期记录保留作历史资料，不能作为当前部署批准或运行状态。

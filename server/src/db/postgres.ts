@@ -72,7 +72,6 @@ function toEntitlement(row: any) {
     currency: row.currency,
     paidAt: row.paid_at,
     expiresAt: row.expires_at || null,
-    reviewQuotaRemaining: row.review_quota_remaining ?? 0,
     source: row.source || 'purchase',
     createdAt: row.created_at,
     updatedAt: row.updated_at,

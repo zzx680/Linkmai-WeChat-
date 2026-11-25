@@ -144,8 +144,7 @@ export interface CaseEntitlement {
   // NULL means the grant never expires. Delivered content stays readable after expiry;
   // only the ability to regenerate is gated by an active grant.
   expiresAt?: Date | null
-  reviewQuotaRemaining?: number
-  source?: 'purchase' | 'subscription' | 'grant' | 'review_bundle'
+  source?: 'purchase' | 'subscription' | 'grant'
   createdAt: Date
   updatedAt: Date
 }

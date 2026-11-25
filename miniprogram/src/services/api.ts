@@ -192,7 +192,6 @@ export interface CaseEntitlement {
   currentPrice?: { amountCents: number; currency: string }
   paidAt?: string | null
   expiresAt?: string | null
-  reviewQuotaRemaining?: number
   features?: {
     fullReport: boolean
     compensationEstimate: boolean

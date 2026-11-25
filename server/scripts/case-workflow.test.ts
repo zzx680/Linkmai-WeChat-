@@ -15,7 +15,7 @@ const store = new WorkflowStore(false)
 const service = new HarnessService(store)
 const fact = (key: string, value: string, evidenceRefs: string[] = []): Fact => ({ id: id(), key, label: key, value, evidenceRefs, status: 'confirmed', source: 'user', sourceId: 'user', revision: 1 })
 const scopes = () => expenseDefinitions.map(d => fact(`claim_${d.code}`, 'no'))
-const version = { id: 'compensation-v1', status: 'approved' as const, legalRefs: ['cn-civil-code-2021-art-1179'], reviewedBy: 'lawyer' }
+const version = { id: 'compensation-v1', status: 'approved' as const, legalRefs: ['cn-civil-code-2021-art-1179'], reviewedBy: 'curated-source' }
 const calc = (facts: Fact[], parameters: any[] = []) => calculate({ id:'calc', revision:1, contextHash:'ctx', facts, parameters, jurisdiction:'CN-ZJ-HZ', accidentDate:'2026-10-20', version })
 
 test('integer cents, explicit scope, missing inputs and formula boundaries', () => {
@@ -40,11 +40,7 @@ test('integer cents, explicit scope, missing inputs and formula boundaries', () 
 
 async function fixture() {
   await db.upsertLegalCorpus(coreTrafficLegalDocuments, coreTrafficLegalSections)
-  const admin = id(), lawyer = id(), other = id()
-  await store.control(c => {
-    c.calculators = [version]; c.parameters = []
-    c.reviewers.push(...[{id:admin,role:'review_admin' as const,email:`${admin}@example.test`},{id:lawyer,role:'reviewer' as const,phone:'13800138000'},{id:other,role:'reviewer' as const,phone:'13900139000'}].map(r => ({...r,passwordHash:'not-a-real-password',active:true})))
-  })
+  await store.control(c => { c.calculators = [version]; c.parameters = [] })
   const user = await db.createUser(`workflow-${id()}`)
   const item = await db.createCase(user.id, '测试案件')
   const entitlement = await db.getOrCreateCaseEntitlement(user.id,item.id); entitlement.status = 'paid'
@@ -52,7 +48,7 @@ async function fixture() {
     ['accident_date','2026-10-20'],['jurisdiction','CN-ZJ-HZ'],['injury_severity','minor'],['risk_screened','yes'],['has_liability_document','yes'],
     ...expenseDefinitions.map(d => [`claim_${d.code}`,'no'])
   ].map(([key,value]) => ({key,label:key,value,source:'user_text'})))
-  return {userId:user.id, caseId:item.id, admin,lawyer,other,entitlement}
+  return {userId:user.id, caseId:item.id, entitlement}
 }
 async function generate(f: Awaited<ReturnType<typeof fixture>>) {
   const run = await service.enqueue(f.userId,f.caseId)
@@ -60,6 +56,27 @@ async function generate(f: Awaited<ReturnType<typeof fixture>>) {
   await service.complete(f.userId,f.caseId,run.runId,claim.run.leaseToken!)
   return (await service.get(f.userId,f.caseId)).documents.find(d => d.type === 'case_report' && d.status === 'draft')!
 }
+
+test('legacy lawyer-review drafts require user confirmation again without a review task', async () => {
+  const f = await fixture()
+  const report = await generate(f)
+  await store.transaction(f.userId, f.caseId, state => {
+    const document = state.documents.find(item => item.id === report.id)!
+    Object.assign(document, { status: 'lawyer_review', userConfirmedAt: new Date().toISOString(), reviewTaskId: 'retired-task' })
+    Object.assign(state, { reviews: [{ id: 'retired-task' }], workflow: 'review_pending' })
+  })
+  const state = await service.get(f.userId, f.caseId)
+  const draft = state.documents.find(item => item.id === report.id)!
+  assert.equal(draft.status, 'draft')
+  assert.equal(draft.userConfirmedAt, undefined)
+  assert.equal('reviewTaskId' in draft, false)
+  assert.equal('reviews' in state, false)
+  assert.equal(state.workflow, 'analysis_available')
+  await assert.rejects(service.approved(f.userId, f.caseId, report.id), /DOCUMENT_NOT_APPROVED/)
+  const confirmed = await service.confirm(f.userId, f.caseId, report.id)
+  assert.equal(confirmed.status, 'approved')
+  assert.ok(confirmed.riskReasons.length)
+})
 
 test('free billing mode allows calculation and report drafting for unpaid or refunded cases', async () => {
   const billingEnabled = config.payment.billingEnabled
@@ -120,53 +137,31 @@ test('candidate facts stay excluded; conflicts need explicit resolution; ownersh
   assert.ok((await store.casesForWork()).every(entry => entry.caseId !== f.caseId || entry.userId === f.userId))
 })
 
-test('review assignment, return, new version, approval and audit privacy', async () => {
+test('risk flags are visible, but AI drafts can be confirmed without a lawyer-review workflow', async () => {
   const f = await fixture(), document = await generate(f)
-  await assert.rejects(service.confirm(f.userId,f.caseId,document.id),/REVIEW_CONSENT_REQUIRED/)
-  const confirmed = await service.confirm(f.userId,f.caseId,document.id,'review-v1')
-  assert.equal(confirmed.status,'lawyer_review')
-  await assert.rejects(service.approved(f.userId,f.caseId,document.id),/DOCUMENT_NOT_APPROVED/)
-  const taskId = confirmed.reviewTaskId!
-  await service.reviewAction(f.admin,f.caseId,taskId,'assign',{reviewerId:f.lawyer})
-  await assert.rejects(service.reviewAction(f.other,f.caseId,taskId,'open',{}),/REVIEWER_FORBIDDEN/)
-  await assert.rejects(service.reviewAction(f.admin,f.caseId,taskId,'approve',{note:'不能代审'}),/REVIEWER_FORBIDDEN/)
-  await service.reviewAction(f.lawyer,f.caseId,taskId,'open',{})
-  await service.reviewAction(f.lawyer,f.caseId,taskId,'return',{note:'核对票据原件',returnItems:['核对所有费用']})
-  await assert.rejects(service.confirm(f.userId,f.caseId,document.id,'review-v1'),/NEW_DOCUMENT_VERSION_REQUIRED/)
-  await service.revise(f.userId,f.caseId,document.id)
-  const next = await generate(f); assert.equal(next.version,2); assert.equal(next.supersedesId,document.id)
-  const v2 = await service.confirm(f.userId,f.caseId,next.id,'review-v1')
-  await service.reviewAction(f.admin,f.caseId,v2.reviewTaskId!,'assign',{reviewerId:f.lawyer})
-  const opened = await service.reviewAction(f.lawyer,f.caseId,v2.reviewTaskId!,'open',{})
-  assert.ok('previous' in opened && opened.previous?.id === document.id)
-  await service.reviewAction(f.lawyer,f.caseId,v2.reviewTaskId!,'approve',{note:'人工核对通过'})
-  assert.equal((await service.approved(f.userId,f.caseId,next.id)).status,'approved')
+  assert.ok(document.riskReasons.includes('RISK_SCREENING_REQUIRED'))
+  const confirmed = await service.confirm(f.userId,f.caseId,document.id)
+  assert.equal(confirmed.status,'approved')
+  assert.equal((await service.approved(f.userId,f.caseId,document.id)).status,'approved')
   await store.transaction(f.userId,f.caseId,state => {
-    assert.ok(state.events.some(e => e.code === 'REVIEW_APPROVED'))
-    assert.equal(JSON.stringify(state.events).includes('人工核对通过'),false)
+    assert.equal('reviews' in state,false)
+    assert.ok(state.events.some(e => e.code === 'DOCUMENT_USER_CONFIRMED'))
   })
 })
 
-test('disabled reviewer, refund, changed input and retired policy cannot publish', async () => {
+test('refund, changed input and retired policy still block AI document access', async () => {
   const f = await fixture(), document = await generate(f)
-  const confirmed = await service.confirm(f.userId,f.caseId,document.id,'review-v1'), task = confirmed.reviewTaskId!
-  await service.reviewAction(f.admin,f.caseId,task,'assign',{reviewerId:f.lawyer})
-  await service.reviewAction(f.lawyer,f.caseId,task,'open',{})
-  await store.control(c => { c.reviewers.find(r => r.id === f.lawyer)!.active = false })
-  await assert.rejects(service.reviewAction(f.lawyer,f.caseId,task,'approve',{note:'x'}),/REVIEWER_FORBIDDEN/)
-  await store.control(c => { c.reviewers.find(r => r.id === f.lawyer)!.active = true })
+  await service.confirm(f.userId,f.caseId,document.id)
   f.entitlement.status = 'refunded'
-  await assert.rejects(service.reviewAction(f.lawyer,f.caseId,task,'open',{}),/PAYMENT_REQUIRED/)
-  await assert.rejects(service.reviewAction(f.admin,f.caseId,task,'assign',{reviewerId:f.other}),/PAYMENT_REQUIRED/)
-  await assert.rejects(service.reviewAction(f.lawyer,f.caseId,task,'approve',{note:'x'}),/PAYMENT_REQUIRED/)
+  await assert.rejects(service.approved(f.userId,f.caseId,document.id),/PAYMENT_REQUIRED/)
   assert.equal((await service.get(f.userId,f.caseId)).documents.length,0)
   f.entitlement.status = 'paid'
   await db.persistConfirmedFacts(f.userId,f.caseId,[{key:'location',label:'地点',value:'新地点',source:'user_text'}])
-  await assert.rejects(service.reviewAction(f.lawyer,f.caseId,task,'approve',{note:'x'}),/INPUT_STALE/)
+  await assert.rejects(service.approved(f.userId,f.caseId,document.id),/INPUT_STALE/)
   assert.ok((await service.get(f.userId,f.caseId)).documents.every(d => d.status === 'stale'))
   const next = await generate(f)
   await store.control(c => { c.calculators[0].status = 'retired' })
-  await assert.rejects(service.confirm(f.userId,f.caseId,next.id,'review-v1'),/INPUT_STALE/)
+  await assert.rejects(service.confirm(f.userId,f.caseId,next.id),/INPUT_STALE/)
   assert.ok((await service.get(f.userId,f.caseId)).documents.every(d => d.status === 'stale'))
 })
 
@@ -191,20 +186,9 @@ test('validators detect tampering; context masks private data; parameters requir
     assert.ok(!JSON.stringify(context.displayFacts).includes('110101199001011234'))
     state.facts.find(f => f.key === 'accident_date')!.value = '2026-99-20'
     assert.throws(() => ContextBuilder.build(state),/ACCIDENT_DATE_REQUIRED/)
-    control.parameters = [{id:'p',version:'v1',code:'meals_daily_cents',jurisdiction:'CN-ZJ-HZ',from:'2026-01-01',value:5000,legalRefs:['expired'],status:'approved',reviewedBy:f.admin}]
+    control.parameters = [{id:'p',version:'v1',code:'meals_daily_cents',jurisdiction:'CN-ZJ-HZ',from:'2026-01-01',value:5000,legalRefs:['expired'],status:'approved',reviewedBy:'curated-source'}]
     assert.equal(applicableParameters(control,'2026-10-20','CN-ZJ-HZ').length,0)
   })
-})
-
-test('normal user tokens cannot enter the independent review domain', async () => {
-  const jwt = require('jsonwebtoken') as typeof import('jsonwebtoken')
-  const { config } = require('../src/config') as typeof import('../src/config')
-  const { reviewerAuth } = require('../src/harness/auth') as typeof import('../src/harness/auth')
-  process.env.REVIEW_JWT_SECRET = 'review-domain-test-secret-with-32-characters'
-  let status = 0, called = false
-  await reviewerAuth({headers:{authorization:`Bearer ${jwt.sign({sub:'user'},config.jwtSecret)}`}} as any,
-    {status(code: number) {status=code;return this},json() {return this}} as any, () => {called=true})
-  assert.equal(status,401); assert.equal(called,false)
 })
 
 test('bounded retries need an explicit new revision after exhaustion', async () => {
@@ -239,22 +223,19 @@ test('JSONB object key normalization preserves fingerprints and approved publica
     const reverse=(value:any):any=>Array.isArray(value)?value.map(reverse):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).reverse().map(key=>[key,reverse(value[key])])):value
     Object.assign(state,reverse(JSON.parse(JSON.stringify(state))))
   })
-  const confirmed=await service.confirm(f.userId,f.caseId,document.id,'review-v1')
-  await service.reviewAction(f.admin,f.caseId,confirmed.reviewTaskId!,'assign',{reviewerId:f.lawyer})
-  await service.reviewAction(f.lawyer,f.caseId,confirmed.reviewTaskId!,'open',{})
-  await service.reviewAction(f.lawyer,f.caseId,confirmed.reviewTaskId!,'approve',{note:'序列化后复核'})
+  const confirmed=await service.confirm(f.userId,f.caseId,document.id)
+  assert.equal(confirmed.status,'approved')
   assert.equal((await service.approved(f.userId,f.caseId,document.id)).status,'approved')
 })
 
-test('workflow HTTP contracts preserve pending confirmation and validate management inputs', async () => {
-  const {caseWorkflowRouter,reviewRouter,harnessEnabled}=require('../src/harness/routes') as typeof import('../src/harness/routes')
-  const reports=require('../src/routes/reports').default
+test('workflow HTTP contracts allow user confirmation without an internal lawyer queue', async () => {
+  const {caseWorkflowRouter,harnessEnabled}=require('../src/harness/routes') as typeof import('../src/harness/routes')
   const f=await fixture()
   async function invoke(router:any,path:string,method:string,body:any={},params:any={},extra:any={}){
     const route=router.stack.find((item:any)=>item.route?.path===path&&item.route.methods[method]).route
     let status=200,payload:any
     const response={status(code:number){status=code;return this},json(value:any){payload=value;return this}}
-    await route.stack[route.stack.length-1].handle({body,params,userId:f.userId,reviewerId:f.admin,...extra},response,()=>undefined)
+    await route.stack[route.stack.length-1].handle({body,params,userId:f.userId,...extra},response,()=>undefined)
     return {status,...payload}
   }
   let gateStatus=0
@@ -265,20 +246,9 @@ test('workflow HTTP contracts preserve pending confirmation and validate managem
     harnessEnabled({} as any,gateResponse as any,()=>assert.fail('disabled feature passed'))
     assert.equal(gateStatus,503)
     process.env.HARNESS_ENABLED='true'
-    const generation=await invoke(reports,'/generate','post',{caseId:f.caseId})
-    assert.equal(generation.status,202);assert.equal(generation.data.confirmationRequired,true)
-    const latest=await invoke(reports,'/:caseId/runs/latest','get',{}, {caseId:f.caseId})
-    assert.equal(latest.data.runId,generation.data.runId)
     const document=await generate(f)
-    const blocked=await invoke(reports,'/:caseId','get',{}, {caseId:f.caseId})
-    assert.equal(blocked.status,409)
-    const consent=await invoke(caseWorkflowRouter,'/:caseId/documents/:documentId/confirm','post',{}, {caseId:f.caseId,documentId:document.id})
-    assert.equal(consent.code,'REVIEW_CONSENT_REQUIRED')
-    const imported=await invoke(reviewRouter,'/legal/import','post',{id:'bad-date',title:'x',authority:'x',documentType:'x',jurisdiction:'CN',sourceUrl:'https://www.gov.cn/',version:'v1',effectiveFrom:'2026-99-01',sourceText:'完整法条原文'.repeat(10),sections:[{articleNumber:'第一条',content:'完整法条原文',legalRefId:'bad-date-ref',keywords:[]}]})
-    assert.equal(imported.status,400)
-    const parameter={id:id(),version:'v1',code:'meals_daily_cents',jurisdiction:'CN-ZJ-HZ',from:'2026-01-01',value:5000,legalRefs:['cn-civil-code-2021-art-1179']}
-    assert.equal((await invoke(reviewRouter,'/parameters','post',parameter)).status,200)
-    const overlap=await invoke(reviewRouter,'/parameters','post',{...parameter,id:id()})
-    assert.equal(overlap.code,'PARAMETER_OVERLAP')
+    const confirmation=await invoke(caseWorkflowRouter,'/:caseId/documents/:documentId/confirm','post',{}, {caseId:f.caseId,documentId:document.id})
+    assert.equal(confirmation.status,200)
+    assert.equal(confirmation.data.status,'approved')
   }finally{if(previous===undefined)delete process.env.HARNESS_ENABLED;else process.env.HARNESS_ENABLED=previous}
 })

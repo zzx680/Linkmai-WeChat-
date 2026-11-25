@@ -19,7 +19,7 @@
   .workflow-label { display: block; font-size: 24rpx; color: $color-text-secondary; margin-bottom: 10rpx; }
   .workflow-body { display: block; font-size: 27rpx; line-height: 1.9; margin-bottom: 12rpx; white-space: pre-wrap; overflow-wrap: anywhere; }
   .workflow-actions { display: flex; gap: 40rpx; color: $color-brand-primary; margin-top: 16rpx; }
-  .workflow-conflict, .workflow-review { padding: 24rpx; margin-top: 20rpx; border-radius: 16rpx; background: #f5f7fa; }
+  .workflow-conflict { padding: 24rpx; margin-top: 20rpx; border-radius: 16rpx; background: #f5f7fa; }
   .workflow-choice { display: block; padding: 20rpx 0; color: $color-brand-primary; }
   .workflow-error { display: block; padding: 24rpx; margin-bottom: 24rpx; border-radius: 16rpx; background: #fff2ec; color: #954620; line-height: 1.7; }
   .workflow-total { display: block; margin-top: 28rpx; font-size: 32rpx; font-weight: 600; }

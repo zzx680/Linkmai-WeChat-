@@ -50,20 +50,6 @@ node -e '
     process.exit(1);
   }
 ' "$SMOKE_RESPONSE_FILE"
-if [ "${LINKMAI_EXPECT_REVIEW:-false}" = true ]; then
-  node -e '
-    const health = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
-    if (health.features?.caseHarness !== true) {
-      console.error("后端未启用案件审核流程"); process.exit(1);
-    }
-  ' "$SMOKE_RESPONSE_FILE"
-  request 200 GET /review/
-elif node -e '
-  const health = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
-  process.exit(health.features?.caseHarness === true ? 0 : 1);
-' "$SMOKE_RESPONSE_FILE"; then
-  request 200 GET /review/
-fi
 request 401 GET /api/auth/session
 request 401 GET /api/payment-orders
 request 401 GET /api/cases/current

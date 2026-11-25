@@ -40,19 +40,11 @@ test('release transport replaces only a retryable source directory before upload
   assert.doesNotMatch(script, /rm -rf -- ['\"]?\$?APP_ROOT/)
 })
 
-test('review activation remains server-local and protects the staged promotion path', () => {
+test('deployment no longer provisions a lawyer review portal or its Nginx route', () => {
   const script = readFileSync(path.join(__dirname, 'ci-deploy.sh'), 'utf8')
-  assert.match(script, /openssl rand -hex 48/)
-  assert.match(script, /REVIEW_JWT_SECRET/)
-  assert.match(script, /HARNESS_ENABLED=true/)
-  assert.match(script, /location = \/review/)
-  assert.match(script, /sudo -n nginx -t/)
-  assert.match(script, /sudo -n systemctl reload nginx/)
-  assert.match(script, /sleep 2/)
-  assert.match(script, /审核配置重载后健康检查超时/)
-  assert.match(script, /curl --fail --silent --show-error --max-time 5/)
-  assert.ok(script.includes(String.raw`proxy_set_header Host \\\$host`))
-  assert.ok(script.includes(String.raw`proxy_set_header X-Forwarded-Proto \\\$scheme`))
+  assert.doesNotMatch(script, /REVIEW_JWT_SECRET|REVIEW_BOOTSTRAP|HARNESS_ENABLED=true/)
+  assert.doesNotMatch(script, /location = \/review|location \/review\//)
+  assert.match(script, /deploy-\$DEPLOY_TARGET\.sh/)
   assert.doesNotMatch(readFileSync(path.join(root, '.github/workflows/deploy-production.yml'), 'utf8'), /REVIEW_JWT_SECRET/)
 })
 

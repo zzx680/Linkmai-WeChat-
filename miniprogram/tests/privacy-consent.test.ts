@@ -77,17 +77,13 @@ test('speech processing requires separate account-specific consent and is cleare
   assert.equal(test.storage.has('linkmai.privacy.speech.third'), false)
 })
 
-test('human review consent is separate, account specific and revoked with case consent', async () => {
+test('revoking case-data consent clears obsolete consent keys from the retired lawyer-review service', async () => {
   const test = fixture()
-  await test.api.ensureCaseDataConsent('first')
-  test.choose(false)
-  assert.equal(await test.api.ensureReviewConsent('first'), false)
-  assert.equal(test.storage.has('linkmai.privacy.review.first'), false)
-  test.choose(true)
-  await test.api.ensureReviewConsent('first')
-  await test.api.ensureReviewConsent('first')
-  assert.equal(test.storage.get('linkmai.privacy.review.first'), PRIVACY_VERSION)
-  assert.equal(test.storage.has('linkmai.privacy.review.second'), false)
+  test.storage.set('linkmai.privacy.case-data.first', PRIVACY_VERSION)
+  test.storage.set('linkmai.privacy.review.first', PRIVACY_VERSION)
+  test.storage.set('linkmai.privacy.speech.first', PRIVACY_VERSION)
   test.api.revokeCaseDataConsent('first')
+  assert.equal(test.storage.has('linkmai.privacy.case-data.first'), false)
   assert.equal(test.storage.has('linkmai.privacy.review.first'), false)
+  assert.equal(test.storage.has('linkmai.privacy.speech.first'), false)
 })

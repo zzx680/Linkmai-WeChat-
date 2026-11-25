@@ -98,6 +98,15 @@
   animation: panelReveal 220ms ease-out;
 }
 
+.ai-consultation-disclosure {
+  display: block;
+  padding: 8rpx 24rpx 4rpx;
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+  line-height: 1.4;
+  text-align: center;
+}
+
 .context-details {
   display: flex;
   flex-wrap: wrap;

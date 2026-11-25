@@ -290,7 +290,7 @@ router.get('/:caseId', async (req, res) => {
       const workspace = await harness.get(userId, caseId)
       const document = workspace.documents.filter(item => item.type === 'case_report' && item.status === 'approved')
         .sort((a,b) => b.version - a.version)[0]
-      if (!document) return res.status(409).json({ success: false, error: '请在案件文书中确认草稿并完成必要审核' })
+      if (!document) return res.status(409).json({ success: false, error: '报告尚未确认；涉及复杂事项时请另行咨询执业律师' })
       const approved = await harness.approved(userId, caseId, document.id)
       return res.json({ success: true, data: { report: {
         caseId, analysis: approved.sections[0].paragraphs.join('\n'), liability: '本系统不自动认定事故责任。',

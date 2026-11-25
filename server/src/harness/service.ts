@@ -3,7 +3,6 @@ import { calculate, CALCULATOR_VERSION, fingerprint, integerInput, numericFactKe
 import { applicableParameters, ContextBuilder, contextHash, currentLegalRefs, draftSections, ModelRouter, OutputValidator, requireCalculator, RiskValidator, SkillRegistry } from './policy'
 import { id, registerMemoryOwner, sourceDigest, WorkflowStore, workflowStore } from './store'
 import { claimableFactKeys, claimCodeByKey, materialClaimCandidates } from './material-claims'
-import { getSignedUrl } from '../services/oss'
 
 const timestamp = (now: number) => new Date(now).toISOString()
 export function audit(state: Workspace, code: string, entityId: string, actorId: string, now = Date.now()) {
@@ -11,7 +10,6 @@ export function audit(state: Workspace, code: string, entityId: string, actorId:
 }
 function invalidate(state: Workspace) {
   state.documents.forEach(doc => { if (!['stale','superseded'].includes(doc.status)) doc.status = 'stale' })
-  state.reviews.forEach(task => { if (task.status !== 'cancelled') task.status = 'stale' })
   state.runs.forEach(run => { if (['queued','running'].includes(run.status)) { run.status = 'stale'; delete run.leaseToken; delete run.leaseOwner; delete run.leaseExpiresAt } })
   state.workflow = 'collecting'
 }
@@ -102,9 +100,8 @@ function refreshWorkflow(state: Workspace) {
   const documents = state.documents.filter(d => d.contextHash === state.contextHash && !['stale','superseded'].includes(d.status))
   state.workflow = state.conflicts.some(c => c.status === 'open') || state.facts.some(f => f.status === 'proposed') ? 'confirming'
     : state.runs.some(r => ['queued','running'].includes(r.status)) ? 'analyzing'
-      : documents.some(d => d.status === 'lawyer_review') ? 'review_pending'
-        : documents.length && documents.every(d => d.status === 'approved') ? 'ready'
-          : documents.length ? 'analysis_available' : 'collecting'
+      : documents.length && documents.every(d => d.status === 'approved') ? 'ready'
+        : documents.length ? 'analysis_available' : 'collecting'
 }
 function findDocument(state: Workspace, documentId: string) {
   const document = state.documents.find(item => item.id === documentId)
@@ -127,8 +124,6 @@ function validatePublication(state: Workspace, document: Document, control: Cont
   if (fingerprint([...document.legalRefs].sort()) !== fingerprint(legalRefs.sort())) throw new Error('INVALID_LEGAL_REFERENCE')
   if (document.legalRefs.some(ref => !effective.has(ref))) throw new Error('INVALID_LEGAL_REFERENCE')
   if (fingerprint(RiskValidator.check(ctx.facts, calculation)) !== fingerprint(document.riskReasons)) throw new Error('INVALID_RISK_ASSESSMENT')
-  if (document.riskReasons.length && !state.reviews.some(task => task.id === document.reviewTaskId && task.documentId === document.id
-    && task.status === 'approved' && task.inputRevision === state.revision && task.contextHash === state.contextHash)) throw new Error('LAWYER_REVIEW_REQUIRED')
   if (!document.userConfirmedAt) throw new Error('USER_CONFIRMATION_REQUIRED')
 }
 export class HarnessService {
@@ -292,25 +287,17 @@ export class HarnessService {
       audit(state, 'RUN_RETRY_OR_FAILURE', run.id, 'worker', now)
     })
   }
-  confirm(userId: string, caseId: string, documentId: string, reviewConsentVersion?: string) {
+  confirm(userId: string, caseId: string, documentId: string) {
     return this.command(userId, caseId, (state, sources, control) => {
       requirePaid(sources)
       const document = findDocument(state, documentId)
-      if (state.reviews.some(task => task.documentId === document.id && task.status === 'returned')) throw new Error('NEW_DOCUMENT_VERSION_REQUIRED')
       if (document.userConfirmedAt) return document
       if (document.status !== 'draft') throw new Error('INVALID_DOCUMENT_TRANSITION')
       if (process.env.HARNESS_PAUSED === 'true') throw new Error('WORKFLOW_PAUSED')
-      if (document.riskReasons.length && reviewConsentVersion !== 'review-v1') throw new Error('REVIEW_CONSENT_REQUIRED')
+      // Confirmation records that the user reviewed this AI-generated draft;
+      // risk reasons remain visible and do not imply a lawyer reviewed it.
       document.userConfirmedAt = timestamp(Date.now()); document.status = 'user_confirmed'
-      if (document.riskReasons.length) {
-        audit(state, 'REVIEW_CONSENT_V1_RECORDED', document.id, userId)
-        const task = { id: id(), documentId, inputRevision: state.revision, contextHash: state.contextHash, status: 'pending' as const,
-          reasonCodes: document.riskReasons, dueAt: timestamp(Date.now() + 2 * 86400000), createdAt: timestamp(Date.now()) }
-        state.reviews.push(task); document.reviewTaskId = task.id; document.status = 'lawyer_review'; state.workflow = 'review_pending'
-        audit(state, 'REVIEW_REQUESTED', task.id, userId)
-      } else {
-        validatePublication(state, document, control); document.status = 'approved'; document.approvedAt = timestamp(Date.now()); state.workflow = 'ready'
-      }
+      validatePublication(state, document, control); document.status = 'approved'; document.approvedAt = timestamp(Date.now()); state.workflow = 'ready'
       audit(state, 'DOCUMENT_USER_CONFIRMED', document.id, userId); return document
     })
   }
@@ -322,86 +309,6 @@ export class HarnessService {
       if (!run) throw new Error('INVALID_RETRY_STATE')
       changedInput(state, control, userId, run.id, 'MANUAL_RETRY_REQUESTED')
       return queueRun(state, sources, control, userId, caseId, Date.now())
-    })
-  }
-  async reviewQueue(reviewerId: string) {
-    const actor = await this.store.control(c => c.reviewers.find(r => r.id === reviewerId && r.active))
-    if (!actor) throw new Error('REVIEWER_FORBIDDEN')
-    const cases = await this.store.reviewCases(reviewerId, actor.role === 'review_admin')
-    const result = []
-    for (const entry of cases) {
-      const tasks = await this.command(entry.userId, entry.caseId, state => state.reviews.filter(task => actor.role === 'review_admin' || task.reviewerId === reviewerId)
-        .map(task => ({ ...task, caseId: entry.caseId, overdue: task.dueAt < timestamp(Date.now()) && ['pending','in_review'].includes(task.status) })))
-      result.push(...tasks)
-    }
-    return result
-  }
-  async reviewAction(actorId: string, caseId: string, taskId: string, action: 'assign' | 'open' | 'approve' | 'return', input: { reviewerId?: string; note?: string; returnItems?: string[] }) {
-    const cases = await this.store.reviewCases(actorId, true)
-    const owned = cases.find(c => c.caseId === caseId)
-    if (!owned) throw new Error('REVIEW_NOT_FOUND')
-    return this.command(owned.userId, caseId, async (state, sources, control) => {
-      const actor = control.reviewers.find(r => r.id === actorId && r.active)
-      const task = state.reviews.find(t => t.id === taskId)
-      if (!actor || !task) throw new Error('REVIEWER_FORBIDDEN')
-      requirePaid(sources)
-      if (action === 'assign') {
-        if (actor.role !== 'review_admin') throw new Error('REVIEWER_FORBIDDEN')
-        const target = control.reviewers.find(r => r.id === input.reviewerId && r.active && r.role === 'reviewer')
-        if (!target || !['pending','in_review'].includes(task.status)) throw new Error('INVALID_REVIEW_ASSIGNMENT')
-        task.reviewerId = target.id; task.status = 'pending'; audit(state, 'REVIEW_ASSIGNED', task.id, actorId); return task
-      }
-      if (task.reviewerId !== actorId || actor.role !== 'reviewer') throw new Error('REVIEWER_FORBIDDEN')
-      const document = findDocument(state, task.documentId)
-      if (task.inputRevision !== state.revision || task.contextHash !== state.contextHash || !['pending','in_review'].includes(task.status)) throw new Error('INPUT_STALE')
-      if (action === 'open') {
-        task.status = 'in_review'; audit(state, 'REVIEW_ACCESSED', task.id, actorId)
-        const previous = state.documents.find(d => d.id === document.supersedesId)
-        const changes = previous ? [...new Set([...previous.sections, ...document.sections].map(section => section.title))]
-          .filter(title => fingerprint(previous.sections.find(s => s.title === title)) !== fingerprint(document.sections.find(s => s.title === title)))
-          .map(title => ({ title, before: previous.sections.find(s => s.title === title)?.paragraphs || [], after: document.sections.find(s => s.title === title)?.paragraphs || [] })) : []
-        return { task, document, previous, changes,
-          facts: state.facts.filter(f => document.factRefs.includes(f.id)), evidence: state.evidence.filter(e => document.evidenceRefs.includes(e.id)),
-          legal: await sources.getLegalReferences(document.legalRefs),
-          calculation: state.calculations.find(c => c.id === document.calculationId) }
-      }
-      requirePaid(sources)
-      if (task.status !== 'in_review' || !input.note?.trim()) throw new Error('REVIEW_NOTE_REQUIRED')
-      task.note = input.note; task.completedAt = timestamp(Date.now())
-      if (action === 'return') {
-        if (!input.returnItems?.length) throw new Error('RETURN_ITEMS_REQUIRED')
-        task.status = 'returned'; task.returnItems = input.returnItems; document.status = 'draft'; delete document.userConfirmedAt
-        audit(state, 'REVIEW_RETURNED', task.id, actorId); return task
-      }
-      task.status = 'approved'; validatePublication(state, document, control)
-      document.status = 'approved'; document.approvedAt = timestamp(Date.now()); state.workflow = 'ready'
-      audit(state, 'REVIEW_APPROVED', task.id, actorId); return task
-    })
-  }
-  async reviewEvidence(actorId: string, caseId: string, taskId: string, evidenceId: string) {
-    const owned = (await this.store.reviewCases(actorId, false)).find(c => c.caseId === caseId)
-    if (!owned) throw new Error('REVIEWER_FORBIDDEN')
-    return this.command(owned.userId, caseId, async (state, sources, control) => {
-      const actor = control.reviewers.find(r => r.id === actorId && r.active && r.role === 'reviewer')
-      const task = state.reviews.find(t => t.id === taskId && t.reviewerId === actorId && t.status === 'in_review')
-      if (!actor || !task) throw new Error('REVIEWER_FORBIDDEN')
-      requirePaid(sources)
-      const document = findDocument(state, task.documentId)
-      const evidence = state.evidence.find(e => e.id === evidenceId && e.status === 'active' && document.evidenceRefs.includes(e.id))
-      if (!evidence) throw new Error('INVALID_REFERENCE')
-      const artifact = sources.artifacts.find(item => item.id === evidence.sourceId)
-      if (!artifact?.ossKey) throw new Error('EVIDENCE_NOT_FOUND')
-      const url = await getSignedUrl(artifact.ossKey, 300)
-      audit(state, 'REVIEW_EVIDENCE_ACCESSED', evidence.id, actorId)
-      return { url, expiresIn: 300 }
-    })
-  }
-  revise(userId: string, caseId: string, documentId: string) {
-    return this.command(userId, caseId, (state, _sources, control) => {
-      const document = findDocument(state, documentId)
-      if (!state.reviews.some(t => t.documentId === document.id && t.status === 'returned')) throw new Error('RETURNED_REVIEW_REQUIRED')
-      changedInput(state, control, userId, document.id, 'DOCUMENT_REVISION_REQUESTED')
-      return { inputRevision: state.revision }
     })
   }
   approved(userId: string, caseId: string, documentId: string) {

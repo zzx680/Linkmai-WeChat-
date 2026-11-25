@@ -24,7 +24,6 @@ async function withEntitlement(caseData: any, userId: string) {
       currency: entitlement?.currency || config.payment.currency,
       paidAt: entitlement?.paidAt || null,
       expiresAt: entitlement?.expiresAt || null,
-      reviewQuotaRemaining: entitlement?.reviewQuotaRemaining ?? 0,
     },
     nextAction: !caseData.materialCount
       ? 'continue_materials'

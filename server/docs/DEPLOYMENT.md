@@ -27,9 +27,9 @@
 - 两环境使用同运行源码归档，核对校验和、SHA、release ID。ID 为 SHA-run_id-run_attempt，原子创建目录，拒绝覆盖。
 - 服务器发布/回滚共用 flock 锁，安装、构建、测试、配置校验、迁移任一步失败即停止。切换后检查健康、功能、鉴权及实际进程版本。
 - production 持锁核对 staging 当前成功 release 和实际进程 SHA。人工真机验收、迁移备份、兼容性仍由审批人核实。
-- Nginx 模板补 /review/ 和 51 MiB 请求上限，线上尚未应用；高权限和共享 OSS 隔离仍待后续变更。
+- Nginx 模板使用 51 MiB 请求上限；线上配置需按常规发布流程单独核验。
 
-首次启用前配置第 6 节 staging Secrets，审查 Nginx 差异。范围及限制见[核查报告](DEPLOYMENT_AUDIT_2026-10-28.md)。
+发布前配置第 6 节 staging Secrets，并审查目标服务器配置差异。范围及限制见[核查报告](DEPLOYMENT_AUDIT_2026-10-28.md)。
 
 ## 2. 已核实的环境与账号
 
@@ -112,7 +112,6 @@ sudo chmod 640 /etc/linkmai/staging.env /etc/linkmai/production.env
 
 - staging `/api/` 转发 8100；production `/api/` 转发 8200，保留请求 Host 和转发协议。
 - 配置上传限制时需为 multipart 请求留余量；后端图片上限 10 MiB，视频上限 50 MiB，两模板已统一为 51m；线上上限仍需核实，模板修改不代表已生效。
-- 律师审核功能需要 `/review/` 静态页转发及 `/api/review/` API；模板已补前者；同日先前只读检查发现线上尚缺，需审查配置、nginx -t/reload 并在 staging 验证。启用审核功能时 smoke 要求页面 200。
 - 每次配置变更先执行 `sudo nginx -t`，通过后才 reload。TLS 证书和微信 request/uploadFile 合法域名须与实际目标一致。
 
 ## 5. staging 部署与验收
@@ -219,7 +218,6 @@ TARO_APP_API_BASE=https://api.linkmai.com/api npm --prefix miniprogram run build
 - [快速开始](../../QUICKSTART.md)：默认 staging 联调，本地后端可选。
 - [后端入口](../README.md)、[数据库迁移](../MIGRATION.md)。
 - [云服务配置](ALIYUN_SETUP.md)、[OSS 当前上传链路](OSS_INTEGRATION.md)。
-- [案件计算、文书与律师审核运维](CASE_WORKFLOW_OPERATIONS.md)：功能开关、审核账号、规则导入及专项验收。
 - [数据申请处理](PRIVACY_REQUESTS.md)、[语音输入](../../miniprogram/src/services/speech/README.md)。
 - [部署文档核查](DEPLOYMENT_AUDIT_2026-10-28.md)：本次修复范围及待应用配置。
 

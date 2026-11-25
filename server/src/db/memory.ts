@@ -154,8 +154,7 @@ export interface CaseEntitlement {
   currency: string
   paidAt?: Date | null
   expiresAt?: Date | null
-  reviewQuotaRemaining?: number
-  source?: 'purchase' | 'subscription' | 'grant' | 'review_bundle'
+  source?: 'purchase' | 'subscription' | 'grant'
   createdAt: Date
   updatedAt: Date
 }
@@ -986,7 +985,6 @@ export const memoryDB = {
       currency: config.payment.currency,
       paidAt: null,
       expiresAt: null,
-      reviewQuotaRemaining: 0,
       source: 'purchase',
       createdAt: now,
       updatedAt: now,
@@ -1115,7 +1113,6 @@ export const memoryDB = {
         currency: input.currency,
         paidAt: null,
         expiresAt: null,
-        reviewQuotaRemaining: 0,
         source: 'purchase',
         createdAt: now,
         updatedAt: now,

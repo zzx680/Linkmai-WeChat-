@@ -2,7 +2,7 @@ import { Calculation, Control, Document, Fact, Workspace } from './types'
 import { CALCULATOR_VERSION, fingerprint, money } from './calculator'
 
 export const bundleSkill = Object.freeze({ id: 'case-bundle', version: 'case-bundle-v1', promptVersion: 'facts-template-v1',
-  templateVersion: 'case-documents-v1', allowedStates: ['collecting','confirming','analyzing','analysis_available','review_pending','ready'],
+  templateVersion: 'case-documents-v1', allowedStates: ['collecting','confirming','analyzing','analysis_available','ready'],
   maxAttempts: 3, leaseMs: 30_000, tools: ['confirmed-facts','approved-laws','calculate','validate-draft'],
   forbiddenActions: ['assign-liability','invent-amounts','external-submit'], confirmationRequired: true })
 
@@ -108,8 +108,8 @@ export const RiskValidator = {
     if (/逃逸|酒驾|醉驾|毒驾|无证|刑事/.test(text)) reasons.push('CRIMINAL_RISK')
     if (/未成年|拒赔|诉讼|复核|时效/.test(text)) reasons.push('SPECIAL_OR_DEADLINE_RISK')
     if (!['none','minor'].includes(values.get('injury_severity') || '')) reasons.push('INJURY_SEVERITY_UNCONFIRMED')
-    // Material fields are user-editable too. Until trusted triage is recorded by a reviewer,
-    // neither an uploaded field nor a checkbox can waive the human risk screening.
+    // Keep a caution flag on generated AI drafts. A material field or checkbox
+    // must not make a complex legal conclusion look verified by a person.
     const supported = (key: string) => facts.some(f => f.key === key && f.value === 'yes' && f.source === 'material' && f.evidenceRefs.length > 0)
     reasons.push('RISK_SCREENING_REQUIRED')
     if (!supported('has_liability_document')) reasons.push('OFFICIAL_FINDING_MISSING')
@@ -125,7 +125,7 @@ export function draftSections(type: Document['type'], state: Workspace, calculat
   if (type === 'evidence_catalog') return [{ title: '已确认信息与来源', paragraphs: facts.map(f => `${f.label}：${f.value}（事实 ${f.id}；来源 ${f.evidenceRefs.join('、') || '用户陈述，待凭证复核'}）`) },
     { title: '核对要求', paragraphs: ['目录只列出当前案件有效引用；材料是否足以证明争议事实仍需结合原件复核。'] }]
   if (type === 'action_plan') return [{ title: '材料补充清单', paragraphs: shortages.length ? shortages : ['当前计算字段已齐备，请继续核对原始票据和事故认定书。'] },
-    { title: '下一步', paragraphs: ['核对事故日期、地区和事实来源。', '保存票据、病历、事故认定书及保险材料，避免遗漏。', '确认草稿；需人工复核的案件等待律师审核后再使用。', '涉及就医或法定期限时及时联系相关机构，不等待本系统处理。'] }]
+    { title: '下一步', paragraphs: ['核对事故日期、地区和事实来源。', '保存票据、病历、事故认定书及保险材料，避免遗漏。', '确认 AI 整理的草稿，并结合原始材料自行判断。', '涉及就医或法定期限时及时联系相关机构，不等待本系统处理。'] }]
   return [{ title: '已确认事故事实', paragraphs: facts.map(f => `${f.label}：${f.value}`) },
     { title: '损失项目试算', paragraphs: calculation.items.map(item => `${item.label}：${item.amountCents === undefined ? '输入不全，未计算' : money(item.amountCents)}；${item.formula}`) },
     { title: '计算范围', paragraphs: [calculation.totalCents === undefined ? '存在缺失输入，不提供确定总额。' : `所选损失项目合计：${money(calculation.totalCents)}。`,

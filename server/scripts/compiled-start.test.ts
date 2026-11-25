@@ -36,16 +36,11 @@ test('compiled CommonJS server boots and serves health without external services
     assert.deepEqual(await notification.json(), { code: 'FAIL', message: '通知校验失败' })
 
     const sameOrigin = `http://127.0.0.1:${port}`
-    const review = await fetch(`${sameOrigin}/api/review/login`, {
+    const retiredReviewPortal = await fetch(`${sameOrigin}/api/review/login`, {
       method: 'POST', headers: { Origin: sameOrigin, 'Content-Type': 'application/json' }, body: '{}',
     })
-    // The disabled feature returns 503, proving same-origin requests reach its guard.
-    assert.equal(review.status, 503)
-    assert.equal(review.headers.get('access-control-allow-origin'), sameOrigin)
-    const foreignReview = await fetch(`${sameOrigin}/api/review/login`, {
-      method: 'POST', headers: { Origin: 'https://untrusted.example', 'Content-Type': 'application/json' }, body: '{}',
-    })
-    assert.equal(foreignReview.status, 403)
+    assert.equal(retiredReviewPortal.status, 404)
+    assert.equal((await fetch(`${sameOrigin}/review/`)).status, 404)
 
     const preflight = await fetch(`http://127.0.0.1:${port}/api/feedback`, {
       method: 'OPTIONS',

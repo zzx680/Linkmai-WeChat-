@@ -21,18 +21,13 @@ export interface Calculation {
   items: CalculationItem[]; missingInputs: string[]; totalCents?: number; status: 'complete' | 'incomplete' | 'requires_review'
 }
 export type DocumentType = 'case_report' | 'evidence_catalog' | 'action_plan'
-export type DocumentStatus = 'draft' | 'user_confirmed' | 'lawyer_review' | 'approved' | 'stale' | 'superseded'
+export type DocumentStatus = 'draft' | 'user_confirmed' | 'approved' | 'stale' | 'superseded'
 export interface Document {
   id: string; type: DocumentType; version: number; inputRevision: number; contextHash: string
   skillVersion: string; promptVersion: string; templateVersion: string
   sections: Array<{ title: string; paragraphs: string[] }>; factRefs: string[]; evidenceRefs: string[]
   legalRefs: string[]; calculationId: string; status: DocumentStatus; riskReasons: string[]
-  userConfirmedAt?: string; approvedAt?: string; reviewTaskId?: string; supersedesId?: string; createdAt: string
-}
-export interface ReviewTask {
-  id: string; documentId: string; inputRevision: number; contextHash: string
-  status: 'pending' | 'in_review' | 'approved' | 'returned' | 'stale' | 'cancelled'
-  reasonCodes: string[]; reviewerId?: string; note?: string; returnItems?: string[]; dueAt: string; createdAt: string; completedAt?: string
+  userConfirmedAt?: string; approvedAt?: string; supersedesId?: string; createdAt: string
 }
 export interface Run {
   id: string; inputRevision: number; contextHash: string; key: string; skillVersion: string
@@ -44,11 +39,10 @@ export interface Run {
 }
 export interface AuditEvent { id: string; entityId: string; code: string; actorId: string; at: string }
 export interface Workspace {
-  caseId: string; revision: number; workflow: 'collecting' | 'confirming' | 'analyzing' | 'analysis_available' | 'review_pending' | 'ready'
+  caseId: string; revision: number; workflow: 'collecting' | 'confirming' | 'analyzing' | 'analysis_available' | 'ready'
   sourceHash: string; contextHash: string; facts: Fact[]; evidence: Evidence[]; conflicts: Conflict[]
-  calculations: Calculation[]; documents: Document[]; reviews: ReviewTask[]; runs: Run[]; events: AuditEvent[]
+  calculations: Calculation[]; documents: Document[]; runs: Run[]; events: AuditEvent[]
 }
-export interface Reviewer { id: string; email?: string; phone?: string; passwordHash: string; role: 'reviewer' | 'review_admin'; active: boolean; invitedBy?: string }
 export interface LegalState { id: string; documentId: string; contentHash: string; sourceHash: string; jurisdiction: string; from: string; to?: string; active: boolean; approved: boolean; reviewedBy?: string }
 export interface Sources {
   revision: number; paid: boolean
@@ -56,4 +50,4 @@ export interface Sources {
   artifacts: Array<{ id: string; type: string; status: string; ossKey?: string; metadata?: { confirmed?: boolean; fields?: Array<{ key: string; label: string; value: string }> } }>
   getLegalReferences: (ids: string[]) => Promise<LegalReference[]>
 }
-export interface Control { calculators: CalculatorVersion[]; parameters: RegionalParameter[]; reviewers: Reviewer[]; legal: LegalState[] }
+export interface Control { calculators: CalculatorVersion[]; parameters: RegionalParameter[]; legal: LegalState[] }

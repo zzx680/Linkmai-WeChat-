@@ -3,23 +3,21 @@ import { config } from '../config'
 import { db } from '../db'
 import { memoryDB } from '../db/memory'
 import { db as postgresDB, pool } from '../db/postgres'
-import { Control, Sources, Workspace } from './types'
+import { Control, Document, Sources, Workspace } from './types'
 import { fingerprint } from './calculator'
 import { coreTrafficLegalSections } from '../legal/core-traffic-law'
-import { LegalDocument, LegalSection } from '../legal/types'
 import { PoolClient } from 'pg'
 
 export const id = () => randomUUID()
 const clone = <T>(value: T): T => structuredClone(value)
 const empty = (caseId: string, revision: number): Workspace => ({ caseId, revision, workflow: 'collecting', sourceHash: '', contextHash: '',
-  facts: [], evidence: [], conflicts: [], calculations: [], documents: [], reviews: [], runs: [], events: [] })
+  facts: [], evidence: [], conflicts: [], calculations: [], documents: [], runs: [], events: [] })
 const entityTables = {
   facts: 'harness_facts', evidence: 'evidence_references', conflicts: 'fact_conflicts', calculations: 'calculation_results',
-  documents: 'document_versions', reviews: 'review_tasks', events: 'review_events',
+  documents: 'document_versions', events: 'review_events',
 } as const
 const memory = new Map<string, Workspace>()
-const memoryControl: Control = { calculators: [], parameters: [], reviewers: [], legal: [] }
-const memoryLegalSources = new Map<string, string>()
+const memoryControl: Control = { calculators: [], parameters: [], legal: [] }
 let serial: Promise<unknown> = Promise.resolve()
 async function memoryLock<T>(fn: () => Promise<T>): Promise<T> {
   const previous = serial
@@ -41,6 +39,15 @@ export class WorkflowStore {
       const item = await db.findCaseById(userId, caseId)
       if (!item) throw new Error('CASE_NOT_FOUND')
       const state = clone(memory.get(caseId) || empty(caseId, item.inputRevision))
+      // Upgrade persisted data written by the retired lawyer-review flow.
+      delete (state as Workspace & { reviews?: unknown }).reviews
+      for (const document of state.documents) {
+        if ((document as { status: string }).status === 'lawyer_review') {
+          document.status = 'draft'
+          delete document.userConfirmedAt
+        }
+        delete (document as Document & { reviewTaskId?: string }).reviewTaskId
+      }
       const before = item.inputRevision
       const entitlement = await db.getOrCreateCaseEntitlement(userId, caseId)
       const sources: Sources = { revision: before, paid: paidRow(entitlement ? { status: entitlement.status, expires_at: entitlement.expiresAt } : undefined),
@@ -66,9 +73,17 @@ export class WorkflowStore {
       const revision = owned.rows[0].input_revision
       const existing = await client.query('SELECT payload FROM harness_case_state WHERE case_id=$1', [caseId])
       const state: Workspace = existing.rows[0]?.payload || empty(caseId, revision)
+      delete (state as Workspace & { reviews?: unknown }).reviews
       for (const [key, table] of Object.entries(entityTables)) {
         const result = await client.query(`SELECT payload FROM ${table} WHERE case_id=$1 ORDER BY id`, [caseId])
         ;(state as unknown as Record<string, unknown>)[key] = result.rows.map(row => row.payload)
+      }
+      for (const document of state.documents) {
+        if ((document as { status: string }).status === 'lawyer_review') {
+          document.status = 'draft'
+          delete document.userConfirmedAt
+        }
+        delete (document as Document & { reviewTaskId?: string }).reviewTaskId
       }
       state.runs = (await client.query("SELECT harness_payload FROM agent_runs WHERE case_id=$1 AND task='case_bundle' ORDER BY created_at", [caseId])).rows.map(row => row.harness_payload)
       const entitlement = await client.query('SELECT status, expires_at FROM case_entitlements WHERE case_id=$1 AND user_id=$2 FOR UPDATE', [caseId, userId])
@@ -83,7 +98,7 @@ export class WorkflowStore {
         await client.query('INSERT INTO case_revisions(id,case_id,input_revision,reason_code,changed_entity_type) VALUES($1,$2,$3,$4,$5)',
           [id(), caseId, state.revision, 'harness_input_change', 'fact'])
       }
-      const summary = { ...state, facts: [], evidence: [], conflicts: [], calculations: [], documents: [], reviews: [], runs: [], events: [] }
+      const summary = { ...state, facts: [], evidence: [], conflicts: [], calculations: [], documents: [], runs: [], events: [] }
       await client.query('INSERT INTO harness_case_state(case_id,payload) VALUES($1,$2) ON CONFLICT(case_id) DO UPDATE SET payload=EXCLUDED.payload', [caseId, JSON.stringify(summary)])
       for (const [key, table] of Object.entries(entityTables)) {
         for (const value of state[key as keyof typeof entityTables]) {
@@ -100,7 +115,7 @@ export class WorkflowStore {
       }
       const ready = paidRow(entitlement.rows[0]) && state.documents.some(d => d.type === 'case_report' && d.status === 'approved' && d.contextHash === state.contextHash)
       await client.query(`UPDATE cases SET has_report=$1,status=CASE WHEN $1 THEN 'ready' WHEN status='ready' THEN 'collecting' ELSE status END,
-        status_label=CASE WHEN $1 THEN '报告已复核' WHEN status='ready' THEN '等待核对与复核' ELSE status_label END WHERE id=$2`, [ready, caseId])
+        status_label=CASE WHEN $1 THEN '报告已确认' WHEN status='ready' THEN '等待核对' ELSE status_label END WHERE id=$2`, [ready, caseId])
       await client.query('COMMIT')
       return result
     } catch (error) { await client.query('ROLLBACK'); throw error } finally { client.release() }
@@ -112,8 +127,7 @@ export class WorkflowStore {
     FROM legal_sections s JOIN legal_documents d ON d.id=s.document_id`)).rows.map(row => ({ id: row.legal_ref_id, documentId: row.document_id, reviewedBy: row.reviewed_by || undefined, contentHash: row.content_hash,
       sourceHash: row.source_hash, jurisdiction: row.jurisdiction, from: row.effective_from, to: row.effective_to || undefined,
       active: row.status === 'active', approved: row.review_status === 'approved' }))
-    const reviewers = (await client.query('SELECT email,phone,payload FROM reviewers ORDER BY id')).rows.map(row => ({ ...row.payload, email: row.email || undefined, phone: row.phone || undefined }))
-    return { calculators: await load('calculator_versions'), parameters: await load('regional_parameters'), reviewers, legal }
+    return { calculators: await load('calculator_versions'), parameters: await load('regional_parameters'), legal }
   }
   private async loadMemoryLegal() {
     const references = await db.getLegalReferences([...new Set([...coreTrafficLegalSections.map(section => section.legalRefId), ...memoryControl.legal.map(ref => ref.id)])])
@@ -145,13 +159,10 @@ export class WorkflowStore {
       const before = clone(control)
       const result = await fn(control)
       await write?.(client)
-      for (const [key, table] of [['calculators','calculator_versions'], ['parameters','regional_parameters'], ['reviewers','reviewers']] as const) {
+      for (const [key, table] of [['calculators','calculator_versions'], ['parameters','regional_parameters']] as const) {
         for (const row of control[key]) {
           if (fingerprint(before[key].find(item => item.id === row.id)) === fingerprint(row)) continue
-          if (key === 'reviewers') {
-            const reviewer = row as Control['reviewers'][number]
-            await client.query('INSERT INTO reviewers(id,email,phone,payload) VALUES($1,$2,$3,$4) ON CONFLICT(id) DO UPDATE SET email=EXCLUDED.email,phone=EXCLUDED.phone,payload=EXCLUDED.payload', [reviewer.id, reviewer.email || null, reviewer.phone || null, JSON.stringify(reviewer)])
-          } else await client.query(`INSERT INTO ${table}(id,payload) VALUES($1,$2) ON CONFLICT(id) DO UPDATE SET payload=EXCLUDED.payload`, [row.id, JSON.stringify(row)])
+          await client.query(`INSERT INTO ${table}(id,payload) VALUES($1,$2) ON CONFLICT(id) DO UPDATE SET payload=EXCLUDED.payload`, [row.id, JSON.stringify(row)])
         }
       }
       const changedDocuments = new Set<string>()
@@ -163,40 +174,12 @@ export class WorkflowStore {
           changedDocuments.add(ref.documentId)
         }
       }
-      for (const key of ['calculators','parameters','reviewers','legal'] as const) for (const row of control[key]) {
+      for (const key of ['calculators','parameters','legal'] as const) for (const row of control[key]) {
         const previous = before[key].find(item => item.id === row.id)
         if (fingerprint(previous) !== fingerprint(row)) await client.query('INSERT INTO harness_admin_events(actor_id,entity_id,code) VALUES($1,$2,$3)', [actorId, row.id, `${key.toUpperCase()}_CHANGED`])
       }
       await client.query('COMMIT'); return result
     } catch (error) { await client.query('ROLLBACK'); throw error } finally { client.release() }
-  }
-  async importLegal(actorId: string, document: LegalDocument, sections: LegalSection[], sourceText: string) {
-    return this.control(control => {
-      if (!control.reviewers.some(actor => actor.id === actorId && actor.active && actor.role === 'review_admin')) throw new Error('REVIEWER_FORBIDDEN')
-      if (control.legal.some(ref => ref.documentId === document.id)) throw new Error('VERSION_IMMUTABLE')
-      if (new Set(sections.map(s => s.legalRefId)).size !== sections.length || sections.some(section => control.legal.some(ref => ref.id === section.legalRefId))) throw new Error('VERSION_IMMUTABLE')
-      if (new Set(sections.map(s => s.articleNumber)).size !== sections.length) throw new Error('INVALID_LEGAL_SOURCE')
-      // Persist review status separately; imported content is pending until explicitly reviewed.
-      for (const section of sections) control.legal.push({ id: section.legalRefId, documentId: document.id, contentHash: section.contentHash,
-        sourceHash: document.sourceHash, jurisdiction: document.jurisdiction, from: document.effectiveFrom, to: document.effectiveTo, active: true, approved: false })
-      return { id: document.id, reviewStatus: 'pending' }
-    }, actorId, async client => {
-      if (!client) { await db.upsertLegalCorpus([document], sections); memoryLegalSources.set(document.id, sourceText); return }
-      await client.query(`INSERT INTO legal_documents(id,title,authority,document_type,jurisdiction,effective_from,effective_to,status,review_status,source_url,source_hash,version)
-        VALUES($1,$2,$3,$4,$5,$6,$7,'active','pending',$8,$9,$10)`, [document.id, document.title, document.authority, document.documentType,
-        document.jurisdiction, document.effectiveFrom, document.effectiveTo || null, document.sourceUrl, document.sourceHash, document.version])
-      for (const section of sections) await client.query(`INSERT INTO legal_sections(id,document_id,legal_ref_id,article_number,content,keywords,content_hash,search_vector)
-        VALUES($1,$2,$3,$4,$5,$6,$7,to_tsvector('simple',$8))`, [section.id, document.id, section.legalRefId, section.articleNumber,
-        section.content, section.keywords, section.contentHash, `${section.content} ${section.keywords.join(' ')}`])
-      await client.query('INSERT INTO legal_versions(id,source_text,imported_by) VALUES($1,$2,$3)', [document.id, sourceText, actorId])
-    })
-  }
-  async legalSource(documentId: string) {
-    const refs = await this.control(c => c.legal.filter(ref => ref.documentId === documentId).map(ref => ref.id))
-    if (!refs.length) throw new Error('LEGAL_DOCUMENT_NOT_FOUND')
-    const sections = await db.getLegalReferences(refs)
-    const sourceText = this.usePostgres ? (await pool.query('SELECT source_text FROM legal_versions WHERE id=$1', [documentId])).rows[0]?.source_text : memoryLegalSources.get(documentId)
-    return { documentId, sections, sourceText: sourceText || null }
   }
   async casesForWork(): Promise<Array<{ caseId: string; userId: string }>> {
     if (!this.usePostgres) {
@@ -209,18 +192,6 @@ export class WorkflowStore {
     }
     return (await pool.query(`SELECT DISTINCT ar.case_id AS "caseId",c.user_id AS "userId" FROM agent_runs ar JOIN cases c ON c.id=ar.case_id
       WHERE ar.task='case_bundle' AND ar.status IN ('queued','running') LIMIT 100`)).rows
-  }
-  async reviewCases(reviewerId: string, admin: boolean): Promise<Array<{ caseId: string; userId: string }>> {
-    if (!this.usePostgres) {
-      const results = []
-      for (const state of memory.values()) if (state.reviews.some(task => admin || task.reviewerId === reviewerId)) {
-        const userId = memoryOwners.get(state.caseId)
-        if (userId && await db.findCaseById(userId, state.caseId)) results.push({ caseId: state.caseId, userId })
-      }
-      return results
-    }
-    return (await pool.query(`SELECT DISTINCT rt.case_id AS "caseId",c.user_id AS "userId" FROM review_tasks rt JOIN cases c ON c.id=rt.case_id
-      WHERE $1::boolean OR rt.payload->>'reviewerId'=$2`, [admin, reviewerId])).rows
   }
 }
 const memoryOwners = new Map<string, string>()

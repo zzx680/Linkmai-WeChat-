@@ -17,10 +17,9 @@ import { materialsRouter } from './routes/materials'
 import paymentOrderRoutes, { casePaymentRouter, paymentNotificationHandler, testPaymentRouter } from './routes/payments'
 import { config, validateRuntimeConfig } from './config'
 import { createRateLimiter, requestContext, securityHeaders } from './middleware/security'
-import path from 'node:path'
-import { caseWorkflowRouter, reviewRouter, harnessEnabled } from './harness/routes'
+import { caseWorkflowRouter } from './harness/routes'
 import { startHarnessWorker } from './harness/worker'
-import { reviewerSecret } from './harness/auth'
+import { ensureCuratedPolicy } from './services/curated-policy'
 
 // 环境变量由入口导入 dotenv/config
 
@@ -35,7 +34,7 @@ app.use(securityHeaders)
 // 中间件
 app.use(cors<Request>((req, callback) => {
   const origin = req.get('origin')
-  // The review desk is served by this backend and posts back to the same origin.
+  // Same-origin client requests are allowed; other origins use the explicit CORS list.
   const sameOrigin = origin === `${req.protocol}://${req.get('host')}`
   const allowed = !origin || sameOrigin || config.corsOrigins.includes(origin)
   callback(allowed ? null : new Error('CORS_ORIGIN_NOT_ALLOWED'), { origin: true, credentials: true })
@@ -90,8 +89,6 @@ app.use('/api/reports', authMiddleware, createRateLimiter({ windowMs: 60_000, ma
 app.use('/api/materials', authMiddleware, createRateLimiter({ windowMs: 60_000, max: 20 }), materialsRouter)
 app.use('/api/upload', authMiddleware, createRateLimiter({ windowMs: 60_000, max: 30 }), uploadRoutes)
 app.use('/api/workflow', authMiddleware, createRateLimiter({ windowMs: 60_000, max: 90 }), caseWorkflowRouter)
-app.use('/api/review', createRateLimiter({ windowMs: 60_000, max: 90 }), reviewRouter)
-app.use('/review', harnessEnabled, express.static(path.resolve(__dirname, '../public/review')))
 
 // 错误处理
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
@@ -120,13 +117,16 @@ app.use((req, res) => {
 // 启动服务
 async function start() {
   validateRuntimeConfig()
-  if (process.env.HARNESS_ENABLED === 'true') reviewerSecret()
   const databaseOk = await db.ping()
   if (!databaseOk) {
     throw new Error('数据库连接失败')
   }
 
   console.log('✅ 数据库连接成功')
+  if (process.env.HARNESS_ENABLED === 'true') {
+    await ensureCuratedPolicy()
+    console.log('✅ 计算规则已就绪')
+  }
   const stopWorker = startHarnessWorker()
   const server = app.listen(PORT, config.host, () => {
     console.log(`✅ 灵迈后端服务启动成功`)

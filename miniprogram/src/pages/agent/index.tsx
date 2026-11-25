@@ -269,6 +269,7 @@ export default function Agent() {
 
       {currentCase && (
         <View className="input-bar">
+          <Text className="ai-consultation-disclosure">灵迈 AI 咨询 · 内容由 AI 生成，仅供参考，不构成律师法律意见</Text>
           <AgentChatSender
             value={inputText}
             sending={isAiTyping}

@@ -32,7 +32,7 @@ test('provider receives one lawyer system prompt followed by native chat history
   const [url, body, options] = provider.mock.calls[0].arguments as unknown as [string, any, any]
   assert.match(url, /\/chat\/completions$/)
   assert.equal(body.messages.filter((message: any) => message.role === 'system').length, 1)
-  assert.match(body.messages[0].content, /^你是交通事故律师/)
+  assert.match(body.messages[0].content, /^你是灵迈 AI 交通事故咨询助手/)
   assert.deepEqual(body.messages, [
     { role: 'system', content: CONVERSATION_SYSTEM_PROMPT },
     { role: 'user', content: '我昨天被追尾了' },

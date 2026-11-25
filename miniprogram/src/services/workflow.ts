@@ -2,7 +2,7 @@ import { request } from './api'
 export interface WorkflowFact { id: string; key: string; label: string; value: string; status: string; evidenceRefs: string[] }
 export interface WorkflowDocument {
   id: string; type: string; version: number; status: string; inputRevision: number; riskReasons: string[]
-  sections: Array<{ title: string; paragraphs: string[] }>; reviewTaskId?: string
+  sections: Array<{ title: string; paragraphs: string[] }>
 }
 export interface WorkflowClaimCandidate {
   id: string; key: string | null; label: string; amountCents: number
@@ -16,7 +16,6 @@ export interface WorkflowWorkspace {
   calculations: Array<{ id: string; status: string; totalCents?: number; contextHash: string; items: Array<{ code: string; label: string; amountCents?: number; formula: string; missingInputs: string[] }> }>
   documents: WorkflowDocument[]; contextHash: string
   legalReferences: Array<{ id: string; title: string; articleNumber: string; content: string; sourceUrl: string; from: string; to?: string }>
-  reviews: Array<{ id: string; status: string; documentId: string; dueAt: string; note?: string; returnItems?: string[] }>
   runs: Array<{ id: string; status: string; safeErrorCode?: string }>
 }
 const base = (caseId: string) => `/workflow/${encodeURIComponent(caseId)}`
@@ -36,6 +35,5 @@ export const workflowApi = {
     data: notificationSubscriptionId ? { notificationSubscriptionId } : undefined,
   }),
   retry: (caseId: string, runId: string) => request({ url: `${base(caseId)}/runs/${encodeURIComponent(runId)}/retry`, method: 'POST' }),
-  confirm: (caseId: string, documentId: string) => request({ url: `${base(caseId)}/documents/${encodeURIComponent(documentId)}/confirm`, method: 'POST', data: { reviewConsentVersion: 'review-v1' } }),
-  revise: (caseId: string, documentId: string) => request({ url: `${base(caseId)}/documents/${encodeURIComponent(documentId)}/revise`, method: 'POST' }),
+  confirm: (caseId: string, documentId: string) => request({ url: `${base(caseId)}/documents/${encodeURIComponent(documentId)}/confirm`, method: 'POST' }),
 }
